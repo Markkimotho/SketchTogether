@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: sketchbook
-  namespace: sketchbook
+  name: sketchtogether
+  namespace: sketchtogether
   annotations:
     # nginx-ingress — install with:
     #   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
@@ -27,17 +27,17 @@ spec:
   # Remove the tls block if you are not using TLS.
   tls:
     - hosts:
-        - sketchbook.yourdomain.com   # <-- replace with your domain
-      secretName: sketchbook-tls
+        - sketchtogether.yourdomain.com   # <-- replace with your domain
+      secretName: sketchtogether-tls
 
   rules:
-    - host: sketchbook.yourdomain.com  # <-- replace with your domain
+    - host: sketchtogether.yourdomain.com  # <-- replace with your domain
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: sketchbook
+                name: sketchtogether
                 port:
                   number: 80

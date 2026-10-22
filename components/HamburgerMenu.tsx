@@ -49,7 +49,7 @@ export default function HamburgerMenu({ roomId, onOpenChange }: HamburgerMenuPro
       >
         <SheetHeader className="px-5 pt-5 pb-4 border-b border-white/6">
           <div className="flex items-center justify-between">
-            <SheetTitle className="font-semibold text-base" style={{ color: 'rgba(200, 210, 180, 0.9)' }}>Sketchbook</SheetTitle>
+            <SheetTitle className="font-semibold text-base" style={{ color: 'rgba(200, 210, 180, 0.9)' }}>SketchTogether</SheetTitle>
             <SheetClose asChild>
               <button className="p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors">
                 <X className="h-4 w-4" />

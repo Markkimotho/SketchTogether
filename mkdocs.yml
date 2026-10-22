@@ -1,7 +1,7 @@
-site_name: Sketchbook - Self-Hosted Drawing App
-site_url: https://markkimotho.github.io/digital-art-collaboration/
-repo_url: https://github.com/Markkimotho/digital-art-collaboration
-repo_name: Markkimotho/digital-art-collaboration
+site_name: SketchTogether - Self-Hosted Drawing App
+site_url: https://markkimotho.github.io/SketchTogether/
+repo_url: https://github.com/Markkimotho/SketchTogether
+repo_name: Markkimotho/SketchTogether
 docs_dir: docs
 
 theme:

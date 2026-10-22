@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: sketchbook-data
-  namespace: sketchbook
+  name: sketchtogether-data
+  namespace: sketchtogether
 spec:
   # ReadWriteOnce: one pod at a time writes to this volume.
   # This matches SQLite's single-writer model — keep replicas: 1 in the Deployment.

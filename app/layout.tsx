@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Canvas — Collaborative Art",
-  description: "Real-time collaborative digital art canvas",
+  title: "SketchTogether — Collaborative Drawing",
+  description: "Real-time collaborative drawing canvas",
 }
 
 export const viewport: Viewport = {

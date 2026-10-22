@@ -108,7 +108,7 @@ export default function RoomLobby() {
       >
         {/* Logo / Title */}
         <motion.div variants={itemVariants} className="text-center mb-10">
-          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: 'rgba(200, 210, 180, 0.9)' }}>Sketchbook</h1>
+          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: 'rgba(200, 210, 180, 0.9)' }}>SketchTogether</h1>
           <p className="text-sm" style={{ color: 'rgba(160, 175, 140, 0.5)' }}>Draw together, in the moment</p>
         </motion.div>
 

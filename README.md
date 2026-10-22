@@ -1,4 +1,4 @@
-# Sketchbook
+# SketchTogether
 
 A real-time collaborative drawing canvas. Draw together from any device — iPad, tablet, laptop, phone. Supports stylus pens with pressure sensitivity and palm rejection.
 
@@ -43,7 +43,7 @@ Opens at `http://localhost:3000`. Do not use `next dev` — the custom `server.t
 
 ```bash
 npm run docker:build
-# or: docker build -t sketchbook:latest .
+# or: docker build -t sketchtogether:latest .
 ```
 
 **Run:**
@@ -53,7 +53,7 @@ npm run docker:run
 # or: docker compose up
 ```
 
-Opens at `http://localhost:3000`. Canvas data persists in a named Docker volume (`sketchbook_data`).
+Opens at `http://localhost:3000`. Canvas data persists in a named Docker volume (`sketchtogether-data`).
 
 **Docker versions used:**
 
@@ -89,12 +89,12 @@ ngrok gives you a public HTTPS URL like `https://abc123.ngrok-free.app` that any
 Example Caddy config (auto HTTPS):
 
 ```
-sketchbook.yourdomain.com {
+sketchtogether.yourdomain.com {
     reverse_proxy localhost:3000
 }
 ```
 
-Your public link: `https://sketchbook.yourdomain.com`
+Your public link: `https://sketchtogether.yourdomain.com`
 
 ### Option 3 — Kubernetes (production, scalable)
 
@@ -109,12 +109,12 @@ Your public link: `https://sketchbook.yourdomain.com`
 
 **Setup:**
 
-1. Edit [k8s/ingress.yaml](k8s/ingress.yaml) — replace `sketchbook.yourdomain.com` with your domain
+1. Edit [k8s/ingress.yaml](k8s/ingress.yaml) — replace `sketchtogether.yourdomain.com` with your domain
 2. Edit [k8s/cert-issuer.yaml](k8s/cert-issuer.yaml) — replace `you@yourdomain.com` with your email
 3. Push your image to a registry (Docker Hub, GHCR, etc.):
    ```bash
-   docker tag sketchbook:latest yourusername/sketchbook:latest
-   docker push yourusername/sketchbook:latest
+   docker tag sketchtogether:latest yourusername/sketchtogether:latest
+   docker push yourusername/sketchtogether:latest
    ```
 4. Update the image field in [k8s/deployment.yaml](k8s/deployment.yaml)
 5. Apply everything:
@@ -124,7 +124,7 @@ Your public link: `https://sketchbook.yourdomain.com`
    ```
 6. Point your domain's DNS to the cluster's load balancer IP (`kubectl get svc -n ingress-nginx`)
 
-cert-manager will automatically issue a Let's Encrypt TLS cert. Your public link: `https://sketchbook.yourdomain.com`
+cert-manager will automatically issue a Let's Encrypt TLS cert. Your public link: `https://sketchtogether.yourdomain.com`
 
 **ngrok is the quickest way to test if you just want to share with someone now.** The VPS route is the best long-term option for a permanent public link.
 
