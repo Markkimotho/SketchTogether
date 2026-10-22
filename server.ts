@@ -1,11 +1,11 @@
 import { createServer } from 'http'
 import { parse } from 'url'
 import path from 'path'
-import fs from 'fs'
 import next from 'next'
 import { Server } from 'socket.io'
 import { PrismaClient } from './generated/prisma/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
+import { bootstrapDb as runBootstrap } from './lib/bootstrap-db'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = 'localhost'
@@ -20,26 +20,9 @@ const prisma = new PrismaClient({ adapter })
 
 // Bootstrap: ensure the DB tables exist (apply migration SQL if tables are missing)
 async function bootstrapDb() {
-  try {
-    await prisma.room.count()
-  } catch {
-    console.log('Bootstrapping database...')
-    const migrationDir = path.resolve(process.cwd(), 'prisma', 'migrations')
-    const migrations = fs.readdirSync(migrationDir)
-      .filter(d => fs.statSync(path.join(migrationDir, d)).isDirectory())
-      .sort()
-    for (const dir of migrations) {
-      const sqlFile = path.join(migrationDir, dir, 'migration.sql')
-      if (fs.existsSync(sqlFile)) {
-        const sql = fs.readFileSync(sqlFile, 'utf8')
-        // Use better-sqlite3 directly to run DDL (Prisma can't run raw migration SQL)
-        const { default: Database } = await import('better-sqlite3')
-        const rawDb = new Database(dbPath)
-        rawDb.exec(sql)
-        rawDb.close()
-        console.log(`Applied migration: ${dir}`)
-      }
-    }
+  const migrationDir = path.resolve(process.cwd(), 'prisma', 'migrations')
+  for (const dir of runBootstrap(dbPath, migrationDir)) {
+    console.log(`Applied migration: ${dir}`)
   }
 }
 

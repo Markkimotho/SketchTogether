@@ -51,6 +51,7 @@ COPY --from=builder /app/prisma/migrations       ./prisma/migrations
 
 # Server and config source (tsx compiles these at startup)
 COPY --from=builder /app/server.ts       ./server.ts
+COPY --from=builder /app/lib             ./lib
 COPY --from=builder /app/next.config.ts  ./next.config.ts
 COPY --from=builder /app/tsconfig.json   ./tsconfig.json
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts

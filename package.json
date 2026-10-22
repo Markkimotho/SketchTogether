@@ -13,7 +13,8 @@
     "docker:build": "docker build -t sketchtogether:latest .",
     "docker:run": "docker compose up",
     "k8s:apply": "kubectl apply -f k8s/",
-    "k8s:delete": "kubectl delete -f k8s/"
+    "k8s:delete": "kubectl delete -f k8s/",
+    "test": "tsx --test lib/*.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.5.0",
@@ -25,7 +26,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.1.7",
     "better-sqlite3": "^12.8.0",
-"class-variance-authority": "^0.7.1",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.0.5",
     "konva": "^9.3.18",
