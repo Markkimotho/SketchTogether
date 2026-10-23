@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { Touchpad, Undo2, X } from 'lucide-react'
-import type { InkStroke } from '@/lib/touchpad'
+import { Maximize2, Minimize2, Touchpad, Undo2, X } from 'lucide-react'
+import { panInkPage, type InkStroke } from '@/lib/touchpad'
 
 interface TouchpadPadProps {
   color: string
@@ -14,58 +14,118 @@ interface TouchpadPadProps {
 
 export default function TouchpadPad({ color, size, disabledReason, onInsert }: TouchpadPadProps) {
   const [open, setOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [enabled, setEnabled] = useState(false)
   const [strokes, setStrokes] = useState<InkStroke[]>([])
   const [draft, setDraft] = useState<InkStroke | null>(null)
-  const [inking, setInking] = useState(false)
-  const [focused, setFocused] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [page, setPage] = useState({ x: 0, y: 0 })
+  const [surfaceSize, setSurfaceSize] = useState({ width: 800, height: 320 })
+  const panelRef = useRef<HTMLElement | null>(null)
   const padRef = useRef<SVGSVGElement | null>(null)
   const draftRef = useRef<InkStroke | null>(null)
-  const spaceRef = useRef(false)
+  const enabledRef = useRef(false)
+  const openRef = useRef(false)
+  const savingRef = useRef(false)
+  const pageRef = useRef(page)
   const pointerRef = useRef<number | null>(null)
-  const lastPointRef = useRef<{ x: number; y: number } | null>(null)
+  const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scrollUntilRef = useRef(0)
+  openRef.current = open
+  savingRef.current = saving
+  pageRef.current = page
 
-  function finish() {
+  const finish = useCallback(() => {
+    if (idleRef.current) clearTimeout(idleRef.current)
+    idleRef.current = null
     const stroke = draftRef.current
     draftRef.current = null
     setDraft(null)
     if (stroke) setStrokes(prev => [...prev, stroke])
-  }
+  }, [])
 
-  function stop() {
-    spaceRef.current = false
+  const pause = useCallback(() => {
+    enabledRef.current = false
+    setEnabled(false)
     pointerRef.current = null
-    lastPointRef.current = null
-    setInking(false)
     finish()
-  }
+  }, [finish])
+
+  const toggleWriting = useCallback(() => {
+    if (savingRef.current) return
+    finish()
+    const next = !enabledRef.current
+    enabledRef.current = next
+    setEnabled(next)
+    setOpen(true)
+    // Opening the pad mounts the surface; focus after it has rendered.
+    requestAnimationFrame(() => padRef.current?.focus())
+  }, [finish])
+
+  const close = useCallback(() => {
+    pause()
+    setOpen(false)
+    setExpanded(false)
+  }, [pause])
 
   useEffect(() => {
-    // Releasing Space outside the pad or switching windows must lift the ink.
-    const release = (event: KeyboardEvent) => {
-      if (event.code === 'Space') stop()
+    const keydown = (event: KeyboardEvent) => {
+      const target = event.target
+      if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey
+        || (target instanceof Element && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'))) return
+      if (event.code === 'KeyW' && !event.shiftKey) {
+        event.preventDefault()
+        if (!event.repeat) toggleWriting()
+      } else if (event.code === 'Escape' && openRef.current) {
+        event.preventDefault()
+        close()
+      }
     }
-    const hide = () => { if (document.hidden) stop() }
-    window.addEventListener('keyup', release)
-    window.addEventListener('blur', stop)
+    const hide = () => { if (document.hidden) pause() }
+    document.addEventListener('keydown', keydown)
+    window.addEventListener('blur', pause)
     document.addEventListener('visibilitychange', hide)
     return () => {
-      window.removeEventListener('keyup', release)
-      window.removeEventListener('blur', stop)
+      document.removeEventListener('keydown', keydown)
+      window.removeEventListener('blur', pause)
       document.removeEventListener('visibilitychange', hide)
+      if (idleRef.current) clearTimeout(idleRef.current)
     }
-    // stop only uses stable setters and refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [toggleWriting, close, pause])
+
+  useEffect(() => {
+    const pad = padRef.current
+    if (!pad || !open) return
+    // One page unit equals one CSS pixel in either layout, so expanding reveals
+    // more paper instead of stretching existing handwriting.
+    const resize = new ResizeObserver(([entry]) => {
+      setSurfaceSize({ width: Math.max(1, entry.contentRect.width), height: Math.max(1, entry.contentRect.height) })
+      finish()
+    })
+    resize.observe(pad)
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (savingRef.current) return
+      finish()
+      pointerRef.current = null
+      // Trackpad momentum is part of navigation, never part of a new ink stroke.
+      scrollUntilRef.current = performance.now() + 180
+      if (event.ctrlKey) return // A trackpad pinch must not become a pan.
+      setPage(previous => panInkPage(previous, event, pad.clientHeight))
+    }
+    pad.addEventListener('wheel', wheel, { passive: false })
+    return () => { resize.disconnect(); pad.removeEventListener('wheel', wheel) }
+  }, [open, finish])
 
   function point(event: ReactPointerEvent<SVGSVGElement>) {
     const rect = event.currentTarget.getBoundingClientRect()
-    return { x: (event.clientX - rect.left) * 800 / rect.width,
-      y: (event.clientY - rect.top) * 320 / rect.height }
+    return { x: pageRef.current.x + event.clientX - rect.left,
+      y: pageRef.current.y + event.clientY - rect.top }
   }
 
-  function draw(at: { x: number; y: number }) {
+  function draw(at: { x: number; y: number }, autoLift = false) {
     const current = draftRef.current
     if (current) {
       const p = current.points
@@ -76,108 +136,120 @@ export default function TouchpadPad({ color, size, disabledReason, onInsert }: T
       : { id: crypto.randomUUID(), points: [at.x, at.y], color, size: Math.max(1.5, Math.min(10, size * 0.38)) }
     draftRef.current = next
     setDraft(next)
+    // Browsers do not expose touchpad finger-up. A short pause separates strokes
+    // in hands-free mode; drag, pen and screen touch still use real pointer-up.
+    if (idleRef.current) clearTimeout(idleRef.current)
+    if (autoLift) idleRef.current = setTimeout(finish, 180)
   }
 
+  function endPointer(event: ReactPointerEvent<SVGSVGElement>) {
+    if (pointerRef.current !== event.pointerId) return
+    pointerRef.current = null
+    finish()
+  }
+
+  const hasInk = strokes.length > 0 || draft !== null
   const buttonClass = 'rounded-lg border border-white/15 px-3 py-2 text-xs hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed'
+  const lines = Array.from({ length: Math.ceil(surfaceSize.height / 80) + 1 }, (_, index) => Math.floor(page.y / 80) * 80 + index * 80)
 
   return (
-    <div className="absolute bottom-16 right-4 z-20 max-w-[calc(100vw-6rem)] cursor-default">
-      <button type="button" aria-expanded={open} aria-controls="touchpad-panel"
-        onClick={() => { stop(); setOpen(value => !value) }}
+    <div className={expanded && open
+      ? 'fixed inset-0 z-50 bg-black/50 p-3 sm:p-6 cursor-default'
+      : 'absolute bottom-16 right-4 z-20 max-w-[calc(100vw-6rem)] cursor-default'}>
+      {!expanded && <button type="button" aria-expanded={open} aria-controls="touchpad-panel" aria-keyshortcuts="W"
+        onClick={() => { if (open) close(); else toggleWriting() }}
         className="ml-auto flex items-center gap-2 rounded-xl glass-strong px-4 py-3 text-sm text-white shadow-xl">
-        <Touchpad size={18} /> Writing pad
-      </button>
+        <Touchpad size={18} /> Writing pad <kbd className="text-xs text-white/60">W</kbd>
+      </button>}
       {open && (
-        <section id="touchpad-panel" aria-label="Touchpad writing pad"
-          className="mt-2 w-[540px] max-w-full rounded-2xl glass-strong p-4 text-white shadow-2xl">
-          <div className="flex items-start justify-between gap-3">
+        <section ref={panelRef} id="touchpad-panel" aria-label="Touchpad writing pad"
+          className={`${expanded ? 'h-full w-full' : 'mt-2 w-[540px] max-w-full max-h-[calc(100dvh-9rem)]'} flex flex-col overflow-y-auto rounded-2xl glass-strong p-4 text-white shadow-2xl`}>
+          <div className="flex shrink-0 items-start justify-between gap-3">
             <div>
               <h2 className="font-medium">Your touchpad. Your handwriting.</h2>
               <p id="touchpad-help" className="mt-1 text-xs leading-relaxed text-white/70">
-                Click the pad once. Hold Space and glide to write; release Space between strokes.
-                You can also click and drag, or use touch or a pen.
+                Press W once to write, again to pause. Glide with one finger; scroll with two fingers
+                to move the page up, down or sideways. Escape closes the pad.
               </p>
             </div>
-            <button type="button" aria-label="Close writing pad" onClick={() => { stop(); setOpen(false) }}
-              className="p-1 rounded hover:bg-white/10"><X size={18} /></button>
+            <div className="flex gap-1">
+              <button type="button" aria-label={expanded ? 'Collapse writing pad' : 'Expand writing pad'}
+                aria-pressed={expanded} onClick={() => { finish(); setExpanded(value => !value) }}
+                className="p-2 rounded hover:bg-white/10">
+                {expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+              </button>
+              <button type="button" aria-label="Close writing pad" onClick={close}
+                className="p-2 rounded hover:bg-white/10"><X size={18} /></button>
+            </div>
           </div>
-          <svg ref={padRef} viewBox="0 0 800 320" preserveAspectRatio="none" tabIndex={0}
+          <svg ref={padRef} viewBox={`${page.x} ${page.y} ${surfaceSize.width} ${surfaceSize.height}`} tabIndex={0}
             role="application" aria-label="Handwriting surface" aria-describedby="touchpad-help"
-            className="mt-3 w-full h-[200px] sm:h-[220px] rounded-xl bg-[#f4ebd8] outline-none focus:ring-2 focus:ring-amber-400 touch-none"
-            style={{ cursor: 'crosshair' }}
-            onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); stop() }}
-            onKeyDown={event => {
-              if (saving) return
-              if (event.code === 'Escape') { stop(); setOpen(false); return }
-              if (event.code !== 'Space' || event.ctrlKey || event.metaKey || event.altKey) return
-              event.preventDefault()
-              if (spaceRef.current || event.repeat) return
-              spaceRef.current = true
-              setInking(true)
-              if (lastPointRef.current) draw(lastPointRef.current)
+            className={`mt-3 w-full ${expanded ? 'flex-1 min-h-[140px]' : 'h-[200px] sm:h-[220px] shrink-0'} rounded-xl bg-[#f4ebd8] outline-none focus:ring-2 focus:ring-amber-400 touch-none`}
+            style={{ cursor: enabled ? 'crosshair' : 'default' }}
+            onBlur={event => {
+              if (!panelRef.current?.contains(event.relatedTarget as Node | null)) pause()
             }}
             onPointerDown={event => {
-              if (saving) return
-              if (!event.isPrimary || event.button !== 0) return
+              if (saving || !event.isPrimary || event.button !== 0) return
               event.preventDefault()
               event.currentTarget.focus()
               event.currentTarget.setPointerCapture(event.pointerId)
               pointerRef.current = event.pointerId
-              setInking(true)
-              const at = point(event)
-              lastPointRef.current = at
-              draw(at)
+              finish()
+              draw(point(event))
             }}
             onPointerMove={event => {
-              if (saving) return
-              if (!event.isPrimary || (pointerRef.current !== null && pointerRef.current !== event.pointerId)) return
-              const at = point(event)
-              if (at.x < 0 || at.x > 800 || at.y < 0 || at.y > 320) { stop(); return }
-              lastPointRef.current = at
-              if (spaceRef.current || pointerRef.current === event.pointerId) draw(at)
+              if (saving || !event.isPrimary || performance.now() < scrollUntilRef.current) return
+              const dragging = pointerRef.current === event.pointerId
+              if (pointerRef.current !== null && !dragging) return
+              const rect = event.currentTarget.getBoundingClientRect()
+              if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) { finish(); return }
+              if (dragging || (event.pointerType === 'mouse' && enabledRef.current)) draw(point(event), !dragging)
             }}
-            onPointerUp={event => {
-              if (pointerRef.current !== event.pointerId) return
-              pointerRef.current = null
-              if (!spaceRef.current) { finish(); setInking(false) }
-            }}
-            onPointerCancel={stop} onLostPointerCapture={stop}
-            onPointerLeave={() => { if (pointerRef.current === null) stop() }}>
-            {[80, 160, 240].map(y => <line key={y} x1="0" x2="800" y1={y} y2={y} stroke="#c8baa0" strokeWidth="1" />)}
+            onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}
+            onPointerLeave={() => { if (pointerRef.current === null) finish() }}>
+            {lines.map(y => <line key={y} x1={page.x} x2={page.x + surfaceSize.width} y1={y} y2={y} stroke="#c8baa0" strokeWidth="1" />)}
             {[...strokes, ...(draft ? [draft] : [])].map((stroke, index) => stroke.points.length === 2
-              ? <circle key={index} cx={stroke.points[0]} cy={stroke.points[1]} r={stroke.size / 2} fill={stroke.color} />
-              : <polyline key={index} points={stroke.points.join(' ')} fill="none" stroke={stroke.color}
+              ? <circle key={stroke.id ?? index} cx={stroke.points[0]} cy={stroke.points[1]} r={stroke.size / 2} fill={stroke.color} />
+              : <polyline key={stroke.id ?? index} points={stroke.points.join(' ')} fill="none" stroke={stroke.color}
                   strokeWidth={stroke.size} strokeLinecap="round" strokeLinejoin="round" />)}
           </svg>
-          <p className="mt-2 text-xs text-amber-200" role="status">
-            {inking ? 'Ink down — release Space to move to the next stroke.' : focused
-              ? 'Ready — hold Space to write.' : 'Click the pad to start writing.'}
+          <p className="mt-2 shrink-0 text-xs text-amber-200" role="status">
+            {saving ? 'Saving handwriting…' : enabled ? 'Writing on — glide to write. Press W to pause.'
+              : 'Writing paused — press W to resume. Click-and-drag, touch and pen also work.'}
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className={buttonClass} disabled={!strokes.length || inking || saving}
-              onClick={() => setStrokes(prev => prev.slice(0, -1))}><Undo2 size={14} className="inline mr-1" />Undo</button>
-            <button type="button" className={buttonClass} disabled={!strokes.length || inking || saving}
-              onClick={() => setStrokes([])}>Clear draft</button>
+          <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
+            <button type="button" className={buttonClass} aria-pressed={enabled} disabled={saving}
+              onClick={toggleWriting}>{enabled ? 'Pause writing (W)' : 'Resume writing (W)'}</button>
+            <button type="button" className={buttonClass} disabled={!hasInk || saving}
+              onClick={() => {
+                if (draftRef.current) { draftRef.current = null; setDraft(null); if (idleRef.current) clearTimeout(idleRef.current) }
+                else setStrokes(prev => prev.slice(0, -1))
+              }}><Undo2 size={14} className="inline mr-1" />Undo</button>
+            <button type="button" className={buttonClass} disabled={!hasInk || saving}
+              onClick={() => { pause(); setStrokes([]) }}>Clear draft</button>
+            <button type="button" className={buttonClass} onClick={() => { finish(); setPage({ x: 0, y: 0 }) }}>Reset view</button>
             <button type="button" className={`${buttonClass} ml-auto bg-amber-600/30`}
-              disabled={!strokes.length || inking || saving || !!disabledReason} onClick={async () => {
+              disabled={!hasInk || saving || !!disabledReason} onClick={async () => {
+                const ink = [...strokes, ...(draftRef.current ? [draftRef.current] : [])]
+                pause()
                 setSaving(true)
                 setError('')
                 try {
-                  if (await onInsert(strokes)) {
+                  if (await onInsert(ink)) {
                     setStrokes([])
-                    stop()
-                    setOpen(false)
+                    close()
                   } else setError('Could not confirm the save. Your draft is still here; reconnect and try again.')
                 } catch {
                   setError('Could not save your handwriting. Your draft is still here.')
                 } finally { setSaving(false) }
               }}>{saving ? 'Adding…' : 'Add to shared canvas'}</button>
           </div>
-          {disabledReason && <p className="mt-2 text-xs text-amber-200" role="status">{disabledReason}</p>}
-          {error && <p className="mt-2 text-xs text-amber-200" role="alert">{error}</p>}
-          <p className="mt-3 text-[11px] leading-relaxed text-white/60">
-            Handwriting stays as ink. Browser mode uses cursor movement; release Space before lifting
-            or repositioning your finger. Some laptops suppress touchpad movement while typing.
+          {disabledReason && <p className="mt-2 shrink-0 text-xs text-amber-200" role="status">{disabledReason}</p>}
+          {error && <p className="mt-2 shrink-0 text-xs text-amber-200" role="alert">{error}</p>}
+          <p className="mt-3 shrink-0 text-[11px] leading-relaxed text-white/60">
+            Handwriting stays as ink. In browser mode, a brief pause separates strokes because finger
+            lifts are unavailable. Press W to pause before repositioning if strokes connect.
           </p>
         </section>
       )}

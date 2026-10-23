@@ -18,25 +18,39 @@ Built with Next.js 15, Socket.io, Prisma 7, and react-konva.
 - Live chat per room
 - Infinite canvas with pan and zoom
 - Rustic paper aesthetic
-- Touchpad writing pad — hold Space and glide without pressing the touchpad, undo draft strokes, then add ink to the shared canvas
+- Touchpad writing pad — press W to toggle hands-free writing, pan with two-finger scrolling, expand the pad, then add ink to the shared canvas
 
 ## Touchpad writing
 
-Open a room and choose **Writing pad** near the bottom right. Click inside the ruled pad,
-hold **Space**, and move your finger on the touchpad to write or sketch. Release Space
-between strokes and before lifting or repositioning your finger. Mouse drag, touch, and
-pen input also work. Undo or clear the private draft, then choose **Add to shared canvas**
-to place it in the current view and share it through the room's existing persistence and
-collaboration. Choose a visible, unlocked layer and connect to the room to insert ink.
-Closing the pad preserves its draft while the room stays mounted; reloading discards an
-unsubmitted draft. The pad uses the current toolbar colour and a capped ink width.
+Open a room and press **W** to open the pad and activate writing. Glide your finger on
+the touchpad to write or sketch without holding a key or clicking. Press **W** again to
+pause or resume; **Escape** closes the pad. The shortcut ignores text fields, editable
+content, key repeats, and modifier combinations. The Writing pad button provides the
+same entry point, and the pad has a visible pause/resume button.
+
+Scroll with **two fingers** over the paper to move the page vertically or horizontally.
+Scrolling ends the current stroke and suppresses ink during scroll momentum; it moves
+only the pad's view, preserving the handwriting's page coordinates. Shift + wheel also
+moves horizontally. **Reset view** returns to the starting area. **Expand writing pad**
+opens a full-window workspace; **Collapse writing pad** restores the smaller panel.
+Expanding reveals more paper without stretching or moving existing ink.
+
+Mouse drag, touch, and pen input also work. Undo or clear the private draft, then choose
+**Add to shared canvas** to place it in the current canvas view. Choose a visible, unlocked
+layer and connect to the room to insert ink. The draft remains until the server confirms
+its save. Closing or resizing preserves the draft while the room stays mounted; reloading
+discards an unsubmitted draft. Moving focus outside the pad or switching windows pauses
+writing. The pad uses the current toolbar colour and a capped ink width.
 
 This is a browser input mode intended for desktop browsers on macOS, Windows, and Linux;
 hardware/browser testing across those systems is still required. It uses cursor coordinates,
 so OS pointer acceleration still applies. Browsers do not provide a portable API for raw
-touchpad contact positions or finger lift. Some drivers suppress touchpad input while a key
-is held; use click-and-drag on those devices. No pressure sensitivity or handwriting-to-text
-is synthesized. This mode does not make a laptop touchpad equivalent to a pen tablet.
+touchpad contact positions or finger lift. Hands-free writing ends a stroke after 180 ms
+without pointer movement; that is a pause heuristic, not finger-lift detection. Quick lifts
+can still connect strokes, and a pause within a line may split it. Press W before repositioning
+when necessary, or use click-and-drag for explicit stroke boundaries. Two-finger touchpad
+navigation uses browser wheel events; the driver/OS must deliver those gestures to the page.
+No pressure sensitivity or handwriting-to-text is synthesized.
 
 ### Product direction
 

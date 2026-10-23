@@ -5,6 +5,21 @@ export interface InkStroke {
   size: number
 }
 
+// Trackpads emit wheel deltas for two-finger navigation. Mouse wheels may use
+// line/page units; Shift + vertical wheel is also a horizontal navigation path.
+export function panInkPage(
+  page: { x: number; y: number },
+  wheel: { deltaX: number; deltaY: number; deltaMode: number; shiftKey: boolean },
+  pageHeight: number,
+) {
+  const unit = wheel.deltaMode === 1 ? 16 : wheel.deltaMode === 2 ? pageHeight : 1
+  const horizontal = wheel.shiftKey && wheel.deltaX === 0
+  return {
+    x: page.x + (horizontal ? wheel.deltaY : wheel.deltaX) * unit,
+    y: page.y + (horizontal ? 0 : wheel.deltaY) * unit,
+  }
+}
+
 // Fit the entire draft as one unit so letters retain their relative positions.
 export function placeInk(
   strokes: InkStroke[],

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { placeInk } from './touchpad'
+import { panInkPage, placeInk } from './touchpad'
 
 test('places handwriting at the visible center and compensates for canvas zoom', () => {
   const draft = [
@@ -26,4 +26,14 @@ test('handles dots and empty drafts without invalid coordinates', () => {
   const [dot] = placeInk([{ points: [12, 14], color: 'black', size: 2 }], { x: 40, y: 50 }, 1)
   assert.deepEqual(dot.points, [40, 50])
   assert.deepEqual(placeInk([{ points: [1], color: 'black', size: 2 }], { x: 0, y: 0 }, 1), [])
+})
+
+test('pans the page in both directions with trackpad deltas, including negative coordinates', () => {
+  assert.deepEqual(panInkPage({ x: 5, y: 10 }, { deltaX: -40, deltaY: 70, deltaMode: 0, shiftKey: false }, 220), { x: -35, y: 80 })
+})
+
+test('normalizes line and page wheel units and supports horizontal Shift scrolling', () => {
+  assert.deepEqual(panInkPage({ x: 0, y: 0 }, { deltaX: 0, deltaY: 2, deltaMode: 1, shiftKey: true }, 220), { x: 32, y: 0 })
+  assert.deepEqual(panInkPage({ x: 0, y: 0 }, { deltaX: 0, deltaY: -1, deltaMode: 2, shiftKey: false }, 220), { x: 0, y: -220 })
+  assert.deepEqual(panInkPage({ x: 0, y: 0 }, { deltaX: 30, deltaY: 0, deltaMode: 0, shiftKey: true }, 220), { x: 30, y: 0 })
 })
