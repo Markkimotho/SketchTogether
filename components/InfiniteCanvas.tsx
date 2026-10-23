@@ -298,6 +298,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   // Drawing state refs
   const currentStrokeRef      = useRef<StrokeData | null>(null)
   const currentPressuresRef   = useRef<number[]>([])
+  const currentShapeRef = useRef<ShapeData | null>(null)
   const currentShapeStartRef  = useRef<{ x: number; y: number } | null>(null)
   const currentShapeIdRef     = useRef<string | null>(null)
   const lineStartRef          = useRef<{ x: number; y: number } | null>(null)
@@ -355,7 +356,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       shiftKeyRef.current = e.shiftKey
       if (pendingText) return
       const active = document.activeElement
-      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
+      if (active instanceof Element && active.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), #touchpad-panel')) return
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedElementIds.length > 0) {
         e.preventDefault()
         onElementsDelete(selectedElementIds)
@@ -403,6 +404,8 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     tiltX = 0, tiltY = 0, pointerType = 'mouse'
   ) => {
     const tool  = toolRef.current
+    const layer = layersRef.current.find(layer => layer.id === layerRef.current)
+    if (!layer || layer.locked || !layer.visible) return
     const world = toWorld(vx, vy)
 
     if (tool === 'text') {
@@ -450,6 +453,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         strokeWidth: sizeRef.current,
         layerId: layerRef.current,
       }
+      currentShapeRef.current = shape
       setCanvasElements(prev => [...prev, shape])
       isDrawingRef.current = true
     }
@@ -489,13 +493,11 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       onStrokeUpdate(stroke.id, newPoints, newPressures)
     } else if (currentShapeIdRef.current && currentShapeStartRef.current) {
       const start = currentShapeStartRef.current
-      setCanvasElements(prev =>
-        prev.map(el =>
-          el.id === currentShapeIdRef.current
-            ? { ...el, width: world.x - start.x, height: world.y - start.y } as ShapeData
-            : el
-        )
-      )
+      const shape = currentShapeRef.current
+      if (!shape) return
+      const updated = { ...shape, width: world.x - start.x, height: world.y - start.y }
+      currentShapeRef.current = updated
+      setCanvasElements(prev => prev.map(element => element.id === updated.id ? updated : element))
     }
   }, [toWorld, onCursorMove, setCanvasElements, onStrokeUpdate])
 
@@ -511,14 +513,11 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       currentPressuresRef.current = []
       onStrokeEnd(stroke)
     } else if (currentShapeIdRef.current) {
-      const shapeId = currentShapeIdRef.current
-      currentShapeIdRef.current    = null
+      const shape = currentShapeRef.current
+      currentShapeIdRef.current = null
       currentShapeStartRef.current = null
-      setCanvasElements(prev => {
-        const shape = prev.find(el => el.id === shapeId) as ShapeData | undefined
-        if (shape) onShapeAdd(shape)
-        return prev
-      })
+      currentShapeRef.current = null
+      if (shape) onShapeAdd(shape)
     }
   }, [onStrokeEnd, onShapeAdd, setCanvasElements])
 

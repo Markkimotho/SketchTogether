@@ -4,7 +4,7 @@ import React, { useState } from 'react'
 import {
   Pencil, Pen, Paintbrush, Eraser, Square, Circle, Hand,
   Minus, Type, MousePointer2, Users, Trash2, Feather,
-  PaintBucket, SquareDashed,
+  PaintBucket, SquareDashed, SquareX,
 } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
@@ -23,6 +23,10 @@ interface ToolBarProps {
   shapeFilled: boolean
   setShapeFilled: React.Dispatch<React.SetStateAction<boolean>>
   onClear: () => void
+  onDelete: () => void
+  selectedCount: number
+  canClear: boolean
+  editPending: boolean
   isConnected: boolean
   userCount: number
   leftNavOpen?: boolean
@@ -64,20 +68,9 @@ export default function ToolBar({
   brushColor, setBrushColor,
   fontSize, setFontSize,
   shapeFilled, setShapeFilled,
-  onClear, isConnected, userCount,
+  onClear, onDelete, selectedCount, canClear, editPending, isConnected, userCount,
   leftNavOpen = false, rightNavOpen = false,
 }: ToolBarProps) {
-  const [showClearConfirm, setShowClearConfirm] = useState(false)
-
-  const handleClear = () => {
-    if (showClearConfirm) {
-      onClear()
-      setShowClearConfirm(false)
-    } else {
-      setShowClearConfirm(true)
-      setTimeout(() => setShowClearConfirm(false), 2500)
-    }
-  }
 
   // Shift toolbar away from open panels
   const desktopX = (leftNavOpen ? 130 : 0) + (rightNavOpen ? -160 : 0)
@@ -114,7 +107,10 @@ export default function ToolBar({
           )}
 
           <div className="w-px h-6 bg-white/10 mx-1" />
-          <ClearButton showConfirm={showClearConfirm} onClear={handleClear} />
+          <button type="button" aria-label="Delete selected objects" title={`Delete ${selectedCount} selected`}
+            disabled={!selectedCount || editPending || !isConnected} onClick={onDelete}
+            className="p-2 text-red-300 disabled:opacity-30"><Trash2 size={16} /></button>
+          <ClearCanvasButton disabled={!canClear || editPending || !isConnected} onClear={onClear} />
           <StatusBadge isConnected={isConnected} userCount={userCount} />
         </motion.div>
       </div>
@@ -150,7 +146,10 @@ export default function ToolBar({
           )}
 
           <div className="h-px w-6 bg-white/10 my-0.5" />
-          <ClearButton showConfirm={showClearConfirm} onClear={handleClear} />
+          <button type="button" aria-label="Delete selected objects" title={`Delete ${selectedCount} selected`}
+            disabled={!selectedCount || editPending || !isConnected} onClick={onDelete}
+            className="p-2 text-red-300 disabled:opacity-30"><Trash2 size={16} /></button>
+          <ClearCanvasButton disabled={!canClear || editPending || !isConnected} onClear={onClear} />
           <StatusBadge isConnected={isConnected} userCount={userCount} />
         </motion.div>
       </div>
@@ -306,32 +305,6 @@ function SizePicker({
   )
 }
 
-function ClearButton({ showConfirm, onClear }: { showConfirm: boolean; onClear: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <motion.button
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-          onClick={onClear}
-          className={`
-            p-2 rounded-lg transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center
-            ${showConfirm
-              ? 'text-red-400 bg-red-500/15 border border-red-500/30'
-              : 'text-white/45 hover:text-red-400 hover:bg-red-500/10'
-            }
-          `}
-        >
-          <Trash2 className="h-[15px] w-[15px]" strokeWidth={1.8} />
-        </motion.button>
-      </TooltipTrigger>
-      <TooltipContent className="text-xs">
-        {showConfirm ? 'Tap again to confirm' : 'Clear canvas'}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 function StatusBadge({ isConnected, userCount }: { isConnected: boolean; userCount: number }) {
   return (
     <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-white/5 min-h-[36px]">
@@ -380,4 +353,18 @@ function FillToggle({
       </TooltipContent>
     </Tooltip>
   )
+}
+
+function ClearCanvasButton({ disabled, onClear }: { disabled: boolean; onClear: () => void }) {
+  const [open, setOpen] = useState(false)
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild><button type="button" aria-label="Clear editable canvas" title="Clear canvas"
+      disabled={disabled} className="p-2 text-white/60 disabled:opacity-30"><SquareX size={16} /></button></PopoverTrigger>
+    <PopoverContent className="glass-panel space-y-3 text-sm">
+      <p>Clear all visible, unlocked layers?</p>
+      <p className="text-xs text-white/60">This removes the artwork for everyone in the room.</p>
+      <div className="flex gap-3"><button onClick={() => setOpen(false)}>Cancel</button>
+        <button onClick={() => { onClear(); setOpen(false) }} className="text-red-300">Clear canvas</button></div>
+    </PopoverContent>
+  </Popover>
 }

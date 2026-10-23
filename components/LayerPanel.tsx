@@ -3,6 +3,7 @@
 import React from 'react'
 import { Lock, Unlock, Eye, EyeOff, Trash2, Plus } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import type { LayerData } from '@/types/canvas'
 
 interface LayerPanelProps {
@@ -29,6 +30,7 @@ export default function LayerPanel({
         <motion.button
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
+          aria-label="Add layer"
           onClick={onLayerAdd}
           className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/8 transition-colors"
         >
@@ -67,27 +69,35 @@ export default function LayerPanel({
               )}
             </div>
 
-            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-0.5 opacity-70 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
               <button
+                aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
                 onClick={(e) => { e.stopPropagation(); onLayerUpdate({ ...layer, locked: !layer.locked }) }}
                 className="p-1 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/8 transition-colors"
               >
                 {layer.locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
               </button>
               <button
+                aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
                 onClick={(e) => { e.stopPropagation(); onLayerUpdate({ ...layer, visible: !layer.visible }) }}
                 className="p-1 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/8 transition-colors"
               >
                 {layer.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
               </button>
-              {layers.length > 1 && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onLayerDelete(layer.id) }}
-                  className="p-1 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              )}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button type="button" aria-label={`Delete ${layer.name}`} disabled={layers.length <= 1 || layer.locked}
+                    onClick={event => event.stopPropagation()}
+                    className="p-1 rounded-lg text-white/40 hover:text-red-400 disabled:opacity-25 disabled:cursor-not-allowed">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="glass-panel space-y-3 text-sm" onClick={event => event.stopPropagation()}>
+                  <p>Delete “{layer.name}” and its artwork?</p>
+                  <p className="text-xs text-white/60">This removes the layer for everyone. A saved version keeps a copy of the artwork.</p>
+                  <button type="button" onClick={() => onLayerDelete(layer.id)} className="rounded-lg bg-red-900/40 px-3 py-2 text-red-200">Delete layer</button>
+                </PopoverContent>
+              </Popover>
             </div>
           </motion.div>
         ))}

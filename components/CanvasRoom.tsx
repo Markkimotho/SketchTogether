@@ -7,6 +7,7 @@ import InfiniteCanvas from './InfiniteCanvas'
 import ToolBar from './ToolBar'
 import CollapsibleSidebar from './CollapsibleSidebar'
 import HamburgerMenu from './HamburgerMenu'
+import { editableElements, mergeCanvasDelta, type CanvasEdit, type CanvasDelta, type EditReply } from '@/lib/canvas-edits'
 import type {
   CanvasElement, LayerData, VersionData, ChatMessage,
   CursorData, StrokeData, ShapeData, TextData,
@@ -34,6 +35,9 @@ export default function CanvasRoom({
   const [canvasElements, setCanvasElements] = useState<CanvasElement[]>(() => {
     try { return JSON.parse(initialCanvasState) } catch { return [] }
   })
+
+  const [editPending, setEditPending] = useState(0)
+  const [editError, setEditError] = useState('')
 
   // Tool state
   const [selectedTool, setSelectedTool] = useState('brush')
@@ -115,6 +119,10 @@ export default function CanvasRoom({
         prev.map(el => (el.id === strokeId ? { ...el, pending: false } as StrokeData : el))
       )
     })
+    socket.on('canvas:edited', ({ delta }: { delta: CanvasDelta }) => {
+      setCanvasElements(prev => mergeCanvasDelta(prev, delta))
+      setSelectedElementIds(prev => prev.filter(id => !delta.removed.some(element => element.id === id)))
+    })
     socket.on('draw:ink-add', ({ strokes }: { strokes: StrokeData[] }) => {
       setCanvasElements(prev => Array.from(new Map([...prev, ...strokes].map(stroke => [stroke.id, stroke])).values()))
     })
@@ -146,6 +154,7 @@ export default function CanvasRoom({
     })
     socket.on('layer:updated', ({ layers: serverLayers }: { layers: LayerData[] }) => {
       setLayers(serverLayers)
+      setSelectedLayer(current => serverLayers.some(layer => layer.id === current) ? current : serverLayers[0]?.id ?? '')
     })
     socket.on('version:saved', ({ version }: { version: VersionData }) => {
       setVersions(prev => [{ ...version, createdAt: new Date(version.createdAt as string).toISOString() }, ...prev])
@@ -161,31 +170,40 @@ export default function CanvasRoom({
     return () => { socket.disconnect() }
   }, [roomId])
 
-  const emitStrokeStart  = useCallback((stroke: StrokeData) => {
+  const commitCanvasEdit = useCallback(async (edit: CanvasEdit): Promise<CanvasDelta | null> => {
+    const socket = socketRef.current
+    if (!socket?.connected) { setEditError('Reconnect to save your edit.'); return null }
+    setEditPending(count => count + 1)
+    setEditError('')
+    try {
+      const reply: EditReply = await socket.timeout(10000).emitWithAck('canvas:edit', { roomId, edit })
+      if (!reply.ok) { setEditError(reply.error); return null }
+      setCanvasElements(prev => mergeCanvasDelta(prev, reply.delta))
+      return reply.delta
+    } catch {
+      setEditError('Could not confirm the save. Reconnect before trying again.')
+      return null
+    } finally { setEditPending(count => count - 1) }
+  }, [roomId])
+
+  const emitStrokeStart = useCallback((stroke: StrokeData) => {
     socketRef.current?.emit('draw:stroke-start', { roomId, stroke })
   }, [roomId])
   const emitStrokeUpdate = useCallback((strokeId: string, points: number[], pressures?: number[]) => {
     socketRef.current?.emit('draw:stroke-update', { roomId, strokeId, points, pressures })
   }, [roomId])
-  const emitStrokeEnd    = useCallback((stroke: StrokeData) => {
-    socketRef.current?.emit('draw:stroke-end', { roomId, stroke })
-  }, [roomId])
-  const emitInkAdd = useCallback(async (strokes: StrokeData[]): Promise<boolean> => {
-    const socket = socketRef.current
-    if (!socket?.connected) return false
-    try {
-      const result: { ok: boolean } = await socket.timeout(10000).emitWithAck('draw:ink-add', { roomId, strokes })
-      if (!result.ok) return false
-      setCanvasElements(prev => Array.from(new Map([...prev, ...strokes].map(stroke => [stroke.id, stroke])).values()))
-      return true
-    } catch { return false }
-  }, [roomId])
-  const emitShapeAdd     = useCallback((shape: ShapeData) => {
-    socketRef.current?.emit('draw:shape-add', { roomId, shape })
-  }, [roomId])
-  const emitTextAdd      = useCallback((text: TextData) => {
-    socketRef.current?.emit('draw:text-add', { roomId, text })
-  }, [roomId])
+  const emitStrokeEnd = useCallback((stroke: StrokeData) => {
+    void commitCanvasEdit({ add: [stroke] })
+  }, [commitCanvasEdit])
+  const emitInkAdd = useCallback(async (strokes: StrokeData[]) => {
+    return (await commitCanvasEdit({ add: strokes })) !== null
+  }, [commitCanvasEdit])
+  const emitShapeAdd = useCallback((shape: ShapeData) => {
+    void commitCanvasEdit({ add: [shape] })
+  }, [commitCanvasEdit])
+  const emitTextAdd = useCallback((text: TextData) => {
+    void commitCanvasEdit({ add: [text] })
+  }, [commitCanvasEdit])
   const emitElementMove  = useCallback((elementId: string, offsetX: number, offsetY: number) => {
     socketRef.current?.emit('draw:element-move', { roomId, elementId, offsetX, offsetY })
   }, [roomId])
@@ -208,12 +226,11 @@ export default function CanvasRoom({
     })
   }, [])
 
-  const handleElementsDelete = useCallback((ids: string[]) => {
-    if (ids.length === 0) return
-    setCanvasElements(prev => prev.filter(el => !ids.includes(el.id)))
-    socketRef.current?.emit('draw:delete', { roomId, elementIds: ids })
-    setSelectedElementIds([])
-  }, [roomId])
+  const handleElementsDelete = useCallback(async (ids: string[]) => {
+    if (!ids.length) return
+    const delta = await commitCanvasEdit({ deleteIds: ids })
+    if (delta) setSelectedElementIds([])
+  }, [commitCanvasEdit])
 
   const handleLayerAdd    = useCallback(() => {
     const layer: LayerData = {
@@ -226,7 +243,11 @@ export default function CanvasRoom({
     socketRef.current?.emit('layer:update', { roomId, layer })
   }, [roomId])
   const handleLayerDelete = useCallback((layerId: string) => {
-    socketRef.current?.emit('layer:delete', { roomId, layerId })
+    const socket = socketRef.current
+    if (!socket?.connected) { setEditError('Reconnect to delete the layer.'); return }
+    void socket.timeout(10000).emitWithAck('layer:delete', { roomId, layerId }).then((reply: EditReply) => {
+      if (!reply.ok) setEditError(reply.error)
+    }).catch(() => setEditError('Could not confirm the layer deletion. Reconnect and try again.'))
   }, [roomId])
   const handleSaveVersion   = useCallback((label: string) => {
     socketRef.current?.emit('version:save', { roomId, label })
@@ -237,11 +258,13 @@ export default function CanvasRoom({
   const handleSendMessage   = useCallback((text: string) => {
     socketRef.current?.emit('chat:send', { roomId, text, author: userName })
   }, [roomId, userName])
-  const handleClearCanvas   = useCallback((layerId?: string) => {
-    socketRef.current?.emit('draw:clear', { roomId, layerId })
-    if (layerId) setCanvasElements(prev => prev.filter(el => el.layerId !== layerId))
-    else setCanvasElements([])
-  }, [roomId])
+  const handleClearCanvas = useCallback(async (layerId?: string) => {
+    const delta = await commitCanvasEdit({ clear: true, layerId })
+    if (delta) setSelectedElementIds([])
+  }, [commitCanvasEdit])
+
+  const editable = editableElements(canvasElements, layers)
+  const deletableSelection = editable.filter(element => selectedElementIds.includes(element.id))
 
   return (
     <motion.div
@@ -293,11 +316,20 @@ export default function CanvasRoom({
         shapeFilled={shapeFilled}
         setShapeFilled={setShapeFilled}
         onClear={handleClearCanvas}
+        onDelete={() => { void handleElementsDelete(deletableSelection.map(element => element.id)) }}
+        selectedCount={deletableSelection.length}
+        canClear={editable.length > 0}
+        editPending={editPending > 0}
         isConnected={isConnected}
         userCount={userCount}
         leftNavOpen={leftNavOpen}
         rightNavOpen={rightNavOpen}
       />
+
+      {editError && <div role="alert" className="fixed bottom-5 left-5 z-40 max-w-sm rounded-xl glass-strong p-3 text-sm text-amber-100">
+        {editError}
+        <button type="button" aria-label="Dismiss save error" onClick={() => setEditError('')} className="ml-3 underline">Dismiss</button>
+      </div>}
 
       <CollapsibleSidebar
         layers={layers}

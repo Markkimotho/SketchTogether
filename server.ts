@@ -7,6 +7,7 @@ import { PrismaClient } from './generated/prisma/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { bootstrapDb as runBootstrap } from './lib/bootstrap-db'
 import type { CanvasElement, StrokeData } from './types/canvas'
+import { applyCanvasEdit, RoomMutationQueue, type CanvasEdit, type EditReply } from './lib/canvas-edits'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = 'localhost'
@@ -18,6 +19,17 @@ const handle = app.getRequestHandler()
 const dbPath = path.resolve(process.cwd(), 'prisma', 'dev.db')
 const adapter = new PrismaBetterSqlite3({ url: dbPath })
 const prisma = new PrismaClient({ adapter })
+const canvasMutations = new RoomMutationQueue()
+
+function editCanvas(roomId: string, edit: CanvasEdit) {
+  return canvasMutations.run(roomId, () => prisma.$transaction(async tx => {
+    const room = await tx.room.findUnique({ where: { id: roomId }, include: { layers: true } })
+    if (!room) throw new Error('Room unavailable')
+    const result = applyCanvasEdit(JSON.parse(room.canvasState || '[]'), room.layers, edit)
+    await tx.room.update({ where: { id: roomId }, data: { canvasState: JSON.stringify(result.elements) } })
+    return result.delta
+  }))
+}
 
 // Bootstrap: ensure the DB tables exist (apply migration SQL if tables are missing)
 async function bootstrapDb() {
@@ -79,151 +91,59 @@ bootstrapDb().then(() => app.prepare()).then(() => {
       }
     })
 
-    // A handwriting draft can contain many strokes. Persist it in one transaction
-    // rather than racing a separate read/modify/write operation for each letter.
-    socket.on('draw:ink-add', async (
-      { roomId, strokes }: { roomId: string; strokes: StrokeData[] },
-      acknowledge?: (result: { ok: boolean }) => void,
-    ) => {
-      const reply = (ok: boolean) => { if (typeof acknowledge === 'function') acknowledge({ ok }) }
-      if (!socket.rooms.has(roomId) || !Array.isArray(strokes) || !strokes.length || strokes.length > 1000
-        || strokes.some(stroke => !stroke || stroke.type !== 'stroke' || stroke.tool !== 'pen'
-          || typeof stroke.id !== 'string' || typeof stroke.layerId !== 'string'
-          || typeof stroke.color !== 'string' || !Number.isFinite(stroke.size) || stroke.size <= 0
-          || !Array.isArray(stroke.points) || stroke.points.length < 2 || stroke.points.length % 2 !== 0
-          || stroke.points.some(value => !Number.isFinite(value)))) {
-        reply(false)
-        return
-      }
+    const commitEdit = async (roomId: string, edit: CanvasEdit, acknowledge?: (result: EditReply) => void) => {
+      const reply = (result: EditReply) => { if (typeof acknowledge === 'function') acknowledge(result) }
+      if (!socket.rooms.has(roomId)) { reply({ ok: false, error: 'Join the room before editing' }); return }
       try {
-        await prisma.$transaction(async tx => {
-          const room = await tx.room.findUnique({ where: { id: roomId }, include: { layers: true } })
-          if (!room) throw new Error('Room unavailable')
-          if (strokes.some(stroke => !room.layers.some(layer => layer.id === stroke.layerId && layer.visible && !layer.locked))) {
-            throw new Error('Layer unavailable')
-          }
-          const current: CanvasElement[] = JSON.parse(room.canvasState || '[]')
-          const combined = Array.from(new Map([...current, ...strokes].map(element => [element.id, element])).values())
-          await tx.room.update({ where: { id: roomId }, data: { canvasState: JSON.stringify(combined) } })
-        })
-        socket.to(roomId).emit('draw:ink-add', { strokes })
-        reply(true)
+        const delta = await editCanvas(roomId, edit)
+        io.to(roomId).emit('canvas:edited', { delta })
+        reply({ ok: true, delta })
       } catch (error) {
-        console.error('Error persisting handwriting:', error)
-        reply(false)
+        reply({ ok: false, error: error instanceof Error ? error.message : 'Could not save the edit' })
       }
+    }
+    socket.on('canvas:edit', ({ roomId, edit }: { roomId: string; edit: CanvasEdit }, acknowledge) => {
+      void commitEdit(roomId, edit, acknowledge)
     })
-
-    socket.on('draw:stroke-start', ({ roomId, stroke }: { roomId: string; stroke: any }) => {
-      socket.to(roomId).emit('draw:stroke-start', { stroke, userId: socket.id })
+    // Keep older drawing clients compatible with the same serialized save path.
+    socket.on('draw:ink-add', ({ roomId, strokes }: { roomId: string; strokes: StrokeData[] }, acknowledge) => {
+      void commitEdit(roomId, { add: strokes }, acknowledge)
     })
-
-    socket.on('draw:stroke-update', ({ roomId, strokeId, points, pressures }: { roomId: string; strokeId: string; points: number[]; pressures?: number[] }) => {
-      socket.to(roomId).emit('draw:stroke-update', { strokeId, points, pressures, userId: socket.id })
+    socket.on('draw:stroke-start', ({ roomId, stroke }) => {
+      if (socket.rooms.has(roomId)) socket.to(roomId).emit('draw:stroke-start', { stroke, userId: socket.id })
     })
-
-    socket.on('draw:stroke-end', async ({ roomId, stroke }: { roomId: string; stroke: any }) => {
-      socket.to(roomId).emit('draw:stroke-end', { strokeId: stroke.id, userId: socket.id })
-
+    socket.on('draw:stroke-update', ({ roomId, strokeId, points, pressures }) => {
+      if (socket.rooms.has(roomId)) socket.to(roomId).emit('draw:stroke-update', { strokeId, points, pressures, userId: socket.id })
+    })
+    socket.on('draw:stroke-end', ({ roomId, stroke }, acknowledge) => {
+      void commitEdit(roomId, { add: [stroke] }, acknowledge)
+    })
+    socket.on('draw:shape-add', ({ roomId, shape }, acknowledge) => {
+      void commitEdit(roomId, { add: [shape] }, acknowledge)
+    })
+    socket.on('draw:text-add', ({ roomId, text }, acknowledge) => {
+      void commitEdit(roomId, { add: [text] }, acknowledge)
+    })
+    socket.on('draw:element-move', async ({ roomId, elementId, offsetX, offsetY }) => {
+      if (!socket.rooms.has(roomId) || ![offsetX, offsetY].every(Number.isFinite)) return
       try {
-        const room = await prisma.room.findUnique({ where: { id: roomId } })
-        if (room) {
-          const currentState: any[] = JSON.parse(room.canvasState || '[]')
-          // Deduplicate: skip if this stroke ID already persisted
-          if (!currentState.some((el: any) => el.id === stroke.id)) {
-            currentState.push(stroke)
-            await prisma.room.update({
-              where: { id: roomId },
-              data: { canvasState: JSON.stringify(currentState) },
-            })
-          }
-        }
-      } catch (err) {
-        console.error('Error persisting stroke:', err)
-      }
+        await canvasMutations.run(roomId, () => prisma.$transaction(async tx => {
+          const room = await tx.room.findUnique({ where: { id: roomId }, include: { layers: true } })
+          if (!room) return
+          const state: CanvasElement[] = JSON.parse(room.canvasState || '[]')
+          const element = state.find(element => element.id === elementId)
+          if (!element || !room.layers.some(layer => layer.id === element.layerId && layer.visible && !layer.locked)) return
+          await tx.room.update({ where: { id: roomId }, data: { canvasState: JSON.stringify(state.map(element =>
+            element.id === elementId ? { ...element, offsetX, offsetY } : element)) } })
+          socket.to(roomId).emit('draw:element-move', { elementId, offsetX, offsetY })
+        }))
+      } catch (error) { console.error('Error moving element:', error) }
     })
-
-    socket.on('draw:shape-add', async ({ roomId, shape }: { roomId: string; shape: any }) => {
-      socket.to(roomId).emit('draw:shape-add', { shape, userId: socket.id })
-
-      try {
-        const room = await prisma.room.findUnique({ where: { id: roomId } })
-        if (room) {
-          const currentState: any[] = JSON.parse(room.canvasState || '[]')
-          if (!currentState.some((el: any) => el.id === shape.id)) {
-            currentState.push(shape)
-            await prisma.room.update({
-              where: { id: roomId },
-              data: { canvasState: JSON.stringify(currentState) },
-            })
-          }
-        }
-      } catch (err) {
-        console.error('Error persisting shape:', err)
-      }
+    socket.on('draw:clear', ({ roomId, layerId }, acknowledge) => {
+      void commitEdit(roomId, { clear: true, layerId }, acknowledge)
     })
-
-    socket.on('draw:text-add', async ({ roomId, text }: { roomId: string; text: any }) => {
-      socket.to(roomId).emit('draw:text-add', { text, userId: socket.id })
-      try {
-        const room = await prisma.room.findUnique({ where: { id: roomId } })
-        if (room) {
-          const currentState: any[] = JSON.parse(room.canvasState || '[]')
-          if (!currentState.some((el: any) => el.id === text.id)) {
-            currentState.push(text)
-            await prisma.room.update({ where: { id: roomId }, data: { canvasState: JSON.stringify(currentState) } })
-          }
-        }
-      } catch (err) { console.error('Error persisting text:', err) }
-    })
-
-    socket.on('draw:element-move', async ({ roomId, elementId, offsetX, offsetY }: { roomId: string; elementId: string; offsetX: number; offsetY: number }) => {
-      socket.to(roomId).emit('draw:element-move', { elementId, offsetX, offsetY })
-      try {
-        const room = await prisma.room.findUnique({ where: { id: roomId } })
-        if (room) {
-          const currentState: any[] = JSON.parse(room.canvasState || '[]')
-          const updated = currentState.map((el: any) =>
-            el.id === elementId ? { ...el, offsetX, offsetY } : el
-          )
-          await prisma.room.update({ where: { id: roomId }, data: { canvasState: JSON.stringify(updated) } })
-        }
-      } catch (err) { console.error('Error persisting element move:', err) }
-    })
-
-    socket.on('draw:clear', async ({ roomId, layerId }: { roomId: string; layerId?: string }) => {
-      socket.to(roomId).emit('draw:clear', { layerId })
-
-      try {
-        const room = await prisma.room.findUnique({ where: { id: roomId } })
-        if (room) {
-          let currentState = JSON.parse(room.canvasState || '[]')
-          currentState = layerId ? currentState.filter((el: any) => el.layerId !== layerId) : []
-          await prisma.room.update({
-            where: { id: roomId },
-            data: { canvasState: JSON.stringify(currentState) },
-          })
-        }
-      } catch (err) {
-        console.error('Error clearing canvas:', err)
-      }
-    })
-
-    socket.on('draw:delete', async ({ roomId, elementIds }: { roomId: string; elementIds: string[] }) => {
-      socket.to(roomId).emit('draw:delete', { elementIds })
-      try {
-        const room = await prisma.room.findUnique({ where: { id: roomId } })
-        if (room) {
-          const currentState: any[] = JSON.parse(room.canvasState || '[]')
-          const filtered = currentState.filter((el: any) => !elementIds.includes(el.id))
-          await prisma.room.update({
-            where: { id: roomId },
-            data: { canvasState: JSON.stringify(filtered) },
-          })
-        }
-      } catch (err) {
-        console.error('Error deleting elements:', err)
-      }
+    socket.on('draw:delete', ({ roomId, elementIds }, acknowledge) => {
+      void commitEdit(roomId, { deleteIds: elementIds }, acknowledge)
     })
 
     socket.on('cursor:move', ({ roomId, x, y, userName }: { roomId: string; x: number; y: number; userName: string }) => {
@@ -266,14 +186,26 @@ bootstrapDb().then(() => app.prepare()).then(() => {
       }
     })
 
-    socket.on('layer:delete', async ({ roomId, layerId }: { roomId: string; layerId: string }) => {
+    socket.on('layer:delete', async ({ roomId, layerId }: { roomId: string; layerId: string }, acknowledge) => {
+      const reply = (result: EditReply) => { if (typeof acknowledge === 'function') acknowledge(result) }
+      if (!socket.rooms.has(roomId)) { reply({ ok: false, error: 'Join the room before editing' }); return }
       try {
-        await prisma.layer.delete({ where: { id: layerId } })
-        const layers = await prisma.layer.findMany({ where: { roomId }, orderBy: { order: 'asc' } })
-        io.to(roomId).emit('layer:updated', { layers })
-      } catch (err) {
-        console.error('Error deleting layer:', err)
-      }
+        const result = await canvasMutations.run(roomId, () => prisma.$transaction(async tx => {
+          const room = await tx.room.findUnique({ where: { id: roomId }, include: { layers: true } })
+          const layer = room?.layers.find(layer => layer.id === layerId)
+          if (!room || !layer) throw new Error('Layer unavailable')
+          if (room.layers.length <= 1) throw new Error('Keep at least one layer')
+          if (layer.locked) throw new Error('Unlock the layer before deleting it')
+          const current: CanvasElement[] = JSON.parse(room.canvasState || '[]')
+          const removed = current.filter(element => element.layerId === layerId)
+          await tx.layer.delete({ where: { id: layerId } })
+          await tx.room.update({ where: { id: roomId }, data: { canvasState: JSON.stringify(current.filter(element => element.layerId !== layerId)) } })
+          return { delta: { removed, added: [] }, layers: room.layers.filter(layer => layer.id !== layerId).sort((a, b) => a.order - b.order) }
+        }))
+        io.to(roomId).emit('canvas:edited', { delta: result.delta })
+        io.to(roomId).emit('layer:updated', { layers: result.layers })
+        reply({ ok: true, delta: result.delta })
+      } catch (error) { reply({ ok: false, error: error instanceof Error ? error.message : 'Could not delete the layer' }) }
     })
 
     socket.on('version:save', async ({ roomId, label }: { roomId: string; label: string }) => {
