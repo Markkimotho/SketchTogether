@@ -20,6 +20,34 @@ Built with Next.js 15, Socket.io, Prisma 7, and react-konva.
 - Rustic paper aesthetic
 - Touchpad writing pad — press W to toggle hands-free writing, pan with two-finger scrolling, expand the pad, then add ink to the shared canvas
 
+## Toolbox and editing
+
+The floating **toolshed** groups ink tools, shapes and navigation. The settings strip
+adapts to the active tool: named pigment swatches and recent colours, a stroke preview,
+width, opacity, text size, and shape fill. Fine ink, Soft graphite and Wash presets set
+up a tool in one click. Use the heading to collapse the toolbox when you need more paper.
+
+- **Select (V):** click artwork, Shift-click to add/remove objects, or drag on empty paper
+  for a marquee selection. Drag selected objects to move them together, including brush
+  and pencil marks. Hidden and locked layers cannot be selected or edited.
+- **Delete:** the trash action beside Duplicate deletes selected objects. The separate
+  clear menu offers current-layer or editable-canvas clearing with explicit confirmation.
+  Successful edits are saved before the server confirms them and broadcasts them to the room.
+- **Undo / redo:** Ctrl/Command Z and Ctrl/Command Shift Z (or Ctrl Y). History tracks up
+  to 50 local actions, including drawing, handwriting insertion, grouped moves, duplication,
+  deletion and clearing. Undo refuses to replace artwork changed by another participant.
+  History is local to the current connection; reconnecting, refreshing or restoring a version
+  clears it. Layer deletion is separate from canvas undo: save a version before removing a layer.
+- **Select all / duplicate:** Ctrl/Command A selects visible, unlocked artwork;
+  Ctrl/Command D duplicates selected objects with an offset.
+- **Tool keys:** P pencil, I ink pen, B brush, C nib, E eraser, L line, R rectangle,
+  O circle, T text, V select, H pan, W writing pad. [ and ] adjust stroke width.
+  Shortcuts leave typing and the writing-pad controls alone. Tool buttons also support arrow-key navigation.
+
+Run `npm test` for edit, history, selection and component regression checks.
+After `npm run build`, run `npm run test:collaboration` for a two-client server check
+using a disposable SQLite database. It does not touch your local rooms or port 3000.
+
 ## Touchpad writing
 
 Open a room and press **W** to open the pad and activate writing. Glide your finger on
@@ -239,6 +267,8 @@ SQLite database is stored at `prisma/dev.db` locally, or in a Docker volume / Ku
 | `draw:stroke-start` | client ↔ server | Broadcast stroke start to other users |
 | `draw:stroke-update` | client ↔ server | Broadcast incremental stroke points |
 | `draw:stroke-end` | client ↔ server | Finalise stroke and persist to DB |
+| `canvas:edit` | client → server | Apply an acknowledged edit and return added/removed artwork for undo |
+| `canvas:edited` | server → clients | Broadcast a saved canvas edit |
 | `draw:ink-add` | client ↔ server | Save a writing-pad draft in one transaction, acknowledge it, and broadcast it |
 | `canvas:clear` | client ↔ server | Clear the canvas for all users |
 | `cursor:move` | client ↔ server | Broadcast live cursor position |
