@@ -91,6 +91,117 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.02 0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23g)' opacity='0.05'/%3E%3C/svg%3E");
   }
 
+  /* A floating notebook: worn paper, moss and a little brass. */
+  .writing-launcher {
+    color: #e0d6ba;
+    border-radius: 1.25rem 1.25rem 0.65rem 1.25rem;
+    border-color: rgba(188, 163, 108, 0.24);
+    transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  }
+  .writing-launcher:hover {
+    transform: translateY(-2px);
+    border-color: rgba(188, 163, 108, 0.5);
+    box-shadow: 0 10px 28px rgba(20, 24, 11, 0.35);
+  }
+  .writing-backdrop {
+    background: rgba(17, 22, 13, 0.64);
+    backdrop-filter: blur(6px);
+    animation: writing-fade 200ms ease-out;
+  }
+  .writing-panel {
+    color: #e0d6ba;
+    border-radius: 1.5rem 1.5rem 0.85rem 1.5rem;
+    border-color: rgba(188, 163, 108, 0.22);
+    background-color: rgba(22, 29, 17, 0.97);
+    box-shadow: 0 24px 70px rgba(24, 22, 12, 0.35), inset 0 1px rgba(238, 217, 166, 0.07);
+    animation: writing-arrive 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    scrollbar-width: thin;
+    scrollbar-color: #596044 transparent;
+  }
+  .writing-heading {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: clamp(1.15rem, 2.5vw, 1.65rem);
+    font-weight: 400;
+    line-height: 1.2;
+    letter-spacing: -0.035em;
+    color: #eee2c5;
+  }
+  .writing-eyebrow {
+    color: #aeab86;
+    font-size: 0.6rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+  .writing-key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    padding: 0.1rem 0.3rem;
+    border: 1px solid rgba(206, 189, 144, 0.18);
+    border-bottom-width: 2px;
+    border-radius: 0.35rem;
+    font-size: 0.6rem;
+    line-height: 1.2;
+    font-family: inherit;
+    color: #cabd99;
+  }
+  .writing-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+    border-radius: 0.75rem;
+    color: #a9ae92;
+    transition: color 160ms ease, background-color 160ms ease;
+  }
+  .writing-icon:hover { background: rgba(216, 203, 163, 0.08); color: #f0e1bc; }
+  .writing-paper {
+    isolation: isolate;
+    border-radius: 0.65rem 0.85rem 1.1rem 0.65rem;
+    background-color: #e9dcba;
+    background-image:
+      radial-gradient(ellipse at 0% 0%, rgba(156, 111, 49, 0.15), transparent 65%),
+      radial-gradient(ellipse at 100% 100%, rgba(156, 111, 49, 0.17), transparent 55%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23p)' opacity='.1'/%3E%3C/svg%3E");
+    box-shadow: inset 0 1px 8px rgba(76, 50, 16, 0.13), 0 3px 0 #b3a27c, 0 6px 0 rgba(155, 140, 101, 0.38);
+  }
+  .writing-caption { color: #acb193; font-size: 0.65rem; }
+  .writing-status-dot { width: 5px; height: 5px; border-radius: 50%; background: #8c896f; }
+  .writing-status-dot.is-active { background: #a5be86; box-shadow: 0 0 0 3px rgba(165, 190, 134, 0.1); }
+  .writing-dock { padding-top: 0.9rem; border-top: 1px solid rgba(192, 177, 132, 0.12); }
+  .writing-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2.25rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid transparent;
+    border-radius: 0.75rem;
+    color: #c2c5ad;
+    font-size: 0.7rem;
+    transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease, transform 180ms ease;
+  }
+  .writing-action:hover:not(:disabled) { background: rgba(215, 204, 164, 0.08); color: #f0e5c9; }
+  .writing-action:active:not(:disabled) { transform: translateY(1px); }
+  .writing-action:disabled { opacity: 0.35; cursor: not-allowed; }
+  .writing-toggle { background: rgba(131, 153, 100, 0.14); border-color: rgba(156, 178, 122, 0.15); }
+  .writing-toggle[aria-pressed='true'] { color: #d6e4bb; }
+  .writing-divider { width: 1px; height: 1.1rem; margin: 0 0.15rem; background: rgba(192, 177, 132, 0.15); }
+  .writing-submit { background: #b5a06b; border-color: #c2af7e; color: #202719; font-weight: 600; padding-inline: 0.85rem; }
+  .writing-submit:hover:not(:disabled) { background: #c8b47e; color: #202719; }
+  .writing-tips { color: #a4a88f; }
+  .writing-tips summary { cursor: pointer; width: fit-content; transition: color 160ms ease; }
+  .writing-tips summary:hover { color: #dfd3b4; }
+  .writing-action:focus-visible, .writing-icon:focus-visible, .writing-launcher:focus-visible, .writing-tips summary:focus-visible {
+    outline: 2px solid #baaa76;
+    outline-offset: 3px;
+  }
+  .studio-toolbar { border-radius: 1rem; border-color: rgba(188, 163, 108, 0.17); }
+  .studio-toolbar button { transition: background-color 180ms ease, color 180ms ease; }
+
   /* ── Canvas backgrounds ── */
   .bg-canvas-plain      { background-color: #cfc09a; }
   .bg-canvas-kraft      { background-color: #b5956a; }
@@ -144,6 +255,20 @@
     background-size: 400px 400px;
     mix-blend-mode: screen;
   }
+}
+
+@keyframes writing-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes writing-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .writing-panel, .writing-backdrop { animation: none; }
+  .writing-launcher, .writing-icon, .writing-action, .studio-toolbar button { transition: none; }
+  .writing-launcher:hover, .writing-action:active:not(:disabled) { transform: none; }
 }
 
 @layer utilities {

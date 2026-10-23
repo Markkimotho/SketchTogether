@@ -36,7 +36,7 @@ opens a full-window workspace; **Collapse writing pad** restores the smaller pan
 Expanding reveals more paper without stretching or moving existing ink.
 
 Mouse drag, touch, and pen input also work. Undo or clear the private draft, then choose
-**Add to shared canvas** to place it in the current canvas view. Choose a visible, unlocked
+**Add to canvas** to place it in the current canvas view. Choose a visible, unlocked
 layer and connect to the room to insert ink. The draft remains until the server confirms
 its save. Closing or resizing preserves the draft while the room stays mounted; reloading
 discards an unsubmitted draft. Moving focus outside the pad or switching windows pauses

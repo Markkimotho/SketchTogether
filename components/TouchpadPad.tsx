@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { Maximize2, Minimize2, Touchpad, Undo2, X } from 'lucide-react'
+import { ArrowUpRight, Feather, Maximize2, Minimize2, Move, Pause, Play, RotateCcw, Trash2, Undo2, X } from 'lucide-react'
 import { panInkPage, type InkStroke } from '@/lib/touchpad'
 
 interface TouchpadPadProps {
@@ -163,45 +163,45 @@ export default function TouchpadPad({ color, size, disabledReason, onInsert }: T
   }
 
   const hasInk = strokes.length > 0 || draft !== null
-  const buttonClass = 'rounded-lg border border-white/15 px-3 py-2 text-xs hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed'
+  const buttonClass = 'writing-action'
   const lines = Array.from({ length: Math.ceil(surfaceSize.height / 80) + 1 }, (_, index) => Math.floor(page.y / 80) * 80 + index * 80)
 
   return (
     <div className={expanded && open
-      ? 'fixed inset-0 z-50 bg-black/50 p-3 sm:p-6 cursor-default'
+      ? 'writing-backdrop fixed inset-0 z-50 p-2 sm:p-6 cursor-default'
       : 'absolute bottom-16 right-4 z-20 max-w-[calc(100vw-6rem)] cursor-default'}>
       {!expanded && <button type="button" aria-expanded={open} aria-controls="touchpad-panel" aria-keyshortcuts="W"
         onClick={() => { if (open) close(); else toggleWriting() }}
-        className="ml-auto flex items-center gap-2 rounded-xl glass-strong px-4 py-3 text-sm text-white shadow-xl">
-        <Touchpad size={18} /> Writing pad <kbd className="text-xs text-white/60">W</kbd>
+        className="writing-launcher ml-auto flex items-center gap-3 glass-strong px-4 py-3 text-sm">
+        <Feather size={17} strokeWidth={1.5} /> Writing pad <kbd className="writing-key">W</kbd>
       </button>}
       {open && (
         <section ref={panelRef} id="touchpad-panel" aria-label="Touchpad writing pad"
-          className={`${expanded ? 'h-full w-full' : 'mt-2 w-[540px] max-w-full max-h-[calc(100dvh-9rem)]'} flex flex-col overflow-y-auto rounded-2xl glass-strong p-4 text-white shadow-2xl`}>
-          <div className="flex shrink-0 items-start justify-between gap-3">
+          className={`${expanded ? 'h-full w-full' : 'mt-3 w-[580px] max-w-full max-h-[calc(100dvh-9rem)]'} writing-panel flex flex-col overflow-y-auto glass-strong p-4 sm:p-5`}>
+          <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
             <div>
-              <h2 className="font-medium">Your touchpad. Your handwriting.</h2>
-              <p id="touchpad-help" className="mt-1 text-xs leading-relaxed text-white/70">
-                Press W once to write, again to pause. Glide with one finger; scroll with two fingers
-                to move the page up, down or sideways. Escape closes the pad.
+              <p className="writing-eyebrow flex items-center gap-2"><Feather size={12} /> A little room to think</p>
+              <h2 className="writing-heading mt-1">Put your thoughts on paper.</h2>
+              <p id="touchpad-help" className="mt-2 text-xs leading-relaxed text-[#b5b79e]">
+                <kbd className="writing-key">W</kbd> to write or pause. Two fingers to wander.
               </p>
             </div>
             <div className="flex gap-1">
               <button type="button" aria-label={expanded ? 'Collapse writing pad' : 'Expand writing pad'}
                 aria-pressed={expanded} onClick={() => { finish(); setExpanded(value => !value) }}
-                className="p-2 rounded hover:bg-white/10">
+                className="writing-icon">
                 {expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
               </button>
               <button type="button" aria-label="Close writing pad" onClick={close}
-                className="p-2 rounded hover:bg-white/10"><X size={18} /></button>
+                className="writing-icon"><X size={18} /></button>
             </div>
           </div>
           <div ref={surfaceRef} data-testid="writing-pad-viewport"
-            className={`relative mt-3 w-full min-w-0 overflow-hidden rounded-xl ${expanded ? 'flex-1 min-h-[140px]' : 'h-[200px] sm:h-[220px] shrink-0'}`}>
+            className={`writing-paper relative w-full min-w-0 overflow-hidden ${expanded ? 'flex-1 min-h-[140px]' : 'h-[220px] sm:h-[260px] shrink-0'}`}>
             <svg ref={padRef} viewBox={`${page.x} ${page.y} ${surfaceSize.width} ${surfaceSize.height}`} tabIndex={0}
               preserveAspectRatio="none"
               role="application" aria-label="Handwriting surface" aria-describedby="touchpad-help"
-              className="absolute inset-0 block h-full w-full bg-[#f4ebd8] outline-none focus:ring-2 focus:ring-inset focus:ring-amber-400 touch-none"
+              className="absolute inset-0 block h-full w-full bg-transparent outline-none focus:ring-2 focus:ring-inset focus:ring-[#a58c53]/60 touch-none"
               style={{ cursor: enabled ? 'crosshair' : 'default' }}
               onBlur={event => {
                 if (!panelRef.current?.contains(event.relatedTarget as Node | null)) pause()
@@ -225,29 +225,36 @@ export default function TouchpadPad({ color, size, disabledReason, onInsert }: T
               }}
               onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}
               onPointerLeave={() => { if (pointerRef.current === null) finish() }}>
-              {lines.map(y => <line key={y} x1={page.x} x2={page.x + surfaceSize.width} y1={y} y2={y} stroke="#c8baa0" strokeWidth="1" />)}
+              {lines.map(y => <line key={y} x1={page.x} x2={page.x + surfaceSize.width} y1={y} y2={y} stroke="#ab9872" strokeOpacity="0.27" strokeWidth="1" />)}
               {[...strokes, ...(draft ? [draft] : [])].map((stroke, index) => stroke.points.length === 2
                 ? <circle key={stroke.id ?? index} cx={stroke.points[0]} cy={stroke.points[1]} r={stroke.size / 2} fill={stroke.color} />
                 : <polyline key={stroke.id ?? index} points={stroke.points.join(' ')} fill="none" stroke={stroke.color}
                     strokeWidth={stroke.size} strokeLinecap="round" strokeLinejoin="round" />)}
             </svg>
           </div>
-          <p className="mt-2 shrink-0 text-xs text-amber-200" role="status">
-            {saving ? 'Saving handwriting…' : enabled ? 'Writing on — glide to write. Press W to pause.'
-              : 'Writing paused — press W to resume. Click-and-drag, touch and pen also work.'}
-          </p>
-          <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
-            <button type="button" className={buttonClass} aria-pressed={enabled} disabled={saving}
-              onClick={toggleWriting}>{enabled ? 'Pause writing (W)' : 'Resume writing (W)'}</button>
+          <div className="writing-caption mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-2" role="status">
+              <span className={`writing-status-dot ${enabled && !saving ? 'is-active' : ''}`} />
+              {saving ? 'Saving handwriting…' : enabled ? 'Writing on — make your mark.' : 'Writing paused — take your time.'}
+            </p>
+            <span className="flex items-center gap-1.5"><Move size={12} /> Two-finger pan</span>
+          </div>
+          <div className="writing-dock mt-4 flex shrink-0 flex-wrap items-center gap-1.5">
+            <button type="button" className={`${buttonClass} writing-toggle`} aria-pressed={enabled} disabled={saving}
+              onClick={toggleWriting}>
+              {enabled ? <Pause size={14} /> : <Play size={14} />}
+              {enabled ? 'Pause' : 'Write'} <kbd className="writing-key">W</kbd>
+            </button>
+            <span className="writing-divider" aria-hidden="true" />
             <button type="button" className={buttonClass} disabled={!hasInk || saving}
               onClick={() => {
                 if (draftRef.current) { draftRef.current = null; setDraft(null); if (idleRef.current) clearTimeout(idleRef.current) }
                 else setStrokes(prev => prev.slice(0, -1))
-              }}><Undo2 size={14} className="inline mr-1" />Undo</button>
+              }}><Undo2 size={14} />Undo</button>
             <button type="button" className={buttonClass} disabled={!hasInk || saving}
-              onClick={() => { pause(); setStrokes([]) }}>Clear draft</button>
-            <button type="button" className={buttonClass} onClick={() => { finish(); setPage({ x: 0, y: 0 }) }}>Reset view</button>
-            <button type="button" className={`${buttonClass} ml-auto bg-amber-600/30`}
+              onClick={() => { pause(); setStrokes([]) }}><Trash2 size={14} /><span className="sr-only sm:not-sr-only">Clear draft</span></button>
+            <button type="button" className={buttonClass} onClick={() => { finish(); setPage({ x: 0, y: 0 }) }}><RotateCcw size={14} /><span className="sr-only sm:not-sr-only">Reset view</span></button>
+            <button type="button" className={`${buttonClass} writing-submit ml-auto`}
               disabled={!hasInk || saving || !!disabledReason} onClick={async () => {
                 const ink = [...strokes, ...(draftRef.current ? [draftRef.current] : [])]
                 pause()
@@ -261,14 +268,16 @@ export default function TouchpadPad({ color, size, disabledReason, onInsert }: T
                 } catch {
                   setError('Could not save your handwriting. Your draft is still here.')
                 } finally { setSaving(false) }
-              }}>{saving ? 'Adding…' : 'Add to shared canvas'}</button>
+              }}>{saving ? 'Adding…' : 'Add to canvas'}<ArrowUpRight size={15} /></button>
           </div>
           {disabledReason && <p className="mt-2 shrink-0 text-xs text-amber-200" role="status">{disabledReason}</p>}
           {error && <p className="mt-2 shrink-0 text-xs text-amber-200" role="alert">{error}</p>}
-          <p className="mt-3 shrink-0 text-[11px] leading-relaxed text-white/60">
-            Handwriting stays as ink. In browser mode, a brief pause separates strokes because finger
-            lifts are unavailable. Press W to pause before repositioning if strokes connect.
-          </p>
+          <details className="writing-tips mt-3 shrink-0 text-[11px] leading-relaxed">
+            <summary>Writing tips &amp; shortcuts</summary>
+            <p className="mt-2">Glide to write, or click and drag, use touch, or a pen. Press W to pause
+              before repositioning if strokes connect. A brief pause separates strokes in browser mode.
+              Handwriting stays as ink. Escape closes the pad; your draft stays here until you reload.</p>
+          </details>
         </section>
       )}
     </div>

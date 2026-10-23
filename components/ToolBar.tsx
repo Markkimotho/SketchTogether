@@ -90,7 +90,7 @@ export default function ToolBar({
           initial={{ y: -60, opacity: 0 }}
           animate={{ y: 0, opacity: 1, x: desktopX }}
           transition={{ type: 'spring', stiffness: 300, damping: 28, delay: 0.1 }}
-          className="pointer-events-auto flex flex-row items-center gap-0.5 p-1.5 rounded-xl glass-strong shadow-2xl"
+          className="studio-toolbar pointer-events-auto flex flex-row items-center gap-0.5 p-1.5 rounded-xl glass-strong shadow-2xl"
         >
           {TOOL_GROUPS.map((group, gi) => (
             <React.Fragment key={gi}>
@@ -125,7 +125,7 @@ export default function ToolBar({
           initial={{ x: -60, opacity: 0 }}
           animate={{ x: 0, opacity: leftNavOpen ? 0 : 1 }}
           transition={{ type: 'spring', stiffness: 300, damping: 28, delay: 0.15 }}
-          className="pointer-events-auto flex flex-col items-center gap-0.5 p-1.5 rounded-xl glass-strong shadow-2xl"
+          className="studio-toolbar pointer-events-auto flex flex-col items-center gap-0.5 p-1.5 rounded-xl glass-strong shadow-2xl"
           style={{ pointerEvents: leftNavOpen ? 'none' : 'auto' }}
         >
           {TOOL_GROUPS.map((group, gi) => (
