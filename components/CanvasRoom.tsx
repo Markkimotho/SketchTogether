@@ -115,6 +115,9 @@ export default function CanvasRoom({
         prev.map(el => (el.id === strokeId ? { ...el, pending: false } as StrokeData : el))
       )
     })
+    socket.on('draw:ink-add', ({ strokes }: { strokes: StrokeData[] }) => {
+      setCanvasElements(prev => Array.from(new Map([...prev, ...strokes].map(stroke => [stroke.id, stroke])).values()))
+    })
     socket.on('draw:shape-add', ({ shape }: { shape: ShapeData }) => {
       setCanvasElements(prev => [...prev, shape])
     })
@@ -166,6 +169,16 @@ export default function CanvasRoom({
   }, [roomId])
   const emitStrokeEnd    = useCallback((stroke: StrokeData) => {
     socketRef.current?.emit('draw:stroke-end', { roomId, stroke })
+  }, [roomId])
+  const emitInkAdd = useCallback(async (strokes: StrokeData[]): Promise<boolean> => {
+    const socket = socketRef.current
+    if (!socket?.connected) return false
+    try {
+      const result: { ok: boolean } = await socket.timeout(10000).emitWithAck('draw:ink-add', { roomId, strokes })
+      if (!result.ok) return false
+      setCanvasElements(prev => Array.from(new Map([...prev, ...strokes].map(stroke => [stroke.id, stroke])).values()))
+      return true
+    } catch { return false }
   }, [roomId])
   const emitShapeAdd     = useCallback((shape: ShapeData) => {
     socketRef.current?.emit('draw:shape-add', { roomId, shape })
@@ -239,6 +252,7 @@ export default function CanvasRoom({
     >
       <div className="absolute inset-0">
         <InfiniteCanvas
+          isConnected={isConnected}
           selectedTool={selectedTool}
           brushSize={brushSize}
           brushColor={brushColor}
@@ -251,6 +265,7 @@ export default function CanvasRoom({
           onStrokeStart={emitStrokeStart}
           onStrokeUpdate={emitStrokeUpdate}
           onStrokeEnd={emitStrokeEnd}
+          onInkAdd={emitInkAdd}
           onShapeAdd={emitShapeAdd}
           onTextAdd={emitTextAdd}
           onElementMove={emitElementMove}

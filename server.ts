@@ -6,6 +6,7 @@ import { Server } from 'socket.io'
 import { PrismaClient } from './generated/prisma/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { bootstrapDb as runBootstrap } from './lib/bootstrap-db'
+import type { CanvasElement, StrokeData } from './types/canvas'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = 'localhost'
@@ -75,6 +76,41 @@ bootstrapDb().then(() => app.prepare()).then(() => {
         socket.emit('room:user-count', { userCount })
       } catch (err) {
         console.error('Error on room:join:', err)
+      }
+    })
+
+    // A handwriting draft can contain many strokes. Persist it in one transaction
+    // rather than racing a separate read/modify/write operation for each letter.
+    socket.on('draw:ink-add', async (
+      { roomId, strokes }: { roomId: string; strokes: StrokeData[] },
+      acknowledge?: (result: { ok: boolean }) => void,
+    ) => {
+      const reply = (ok: boolean) => { if (typeof acknowledge === 'function') acknowledge({ ok }) }
+      if (!socket.rooms.has(roomId) || !Array.isArray(strokes) || !strokes.length || strokes.length > 1000
+        || strokes.some(stroke => !stroke || stroke.type !== 'stroke' || stroke.tool !== 'pen'
+          || typeof stroke.id !== 'string' || typeof stroke.layerId !== 'string'
+          || typeof stroke.color !== 'string' || !Number.isFinite(stroke.size) || stroke.size <= 0
+          || !Array.isArray(stroke.points) || stroke.points.length < 2 || stroke.points.length % 2 !== 0
+          || stroke.points.some(value => !Number.isFinite(value)))) {
+        reply(false)
+        return
+      }
+      try {
+        await prisma.$transaction(async tx => {
+          const room = await tx.room.findUnique({ where: { id: roomId }, include: { layers: true } })
+          if (!room) throw new Error('Room unavailable')
+          if (strokes.some(stroke => !room.layers.some(layer => layer.id === stroke.layerId && layer.visible && !layer.locked))) {
+            throw new Error('Layer unavailable')
+          }
+          const current: CanvasElement[] = JSON.parse(room.canvasState || '[]')
+          const combined = Array.from(new Map([...current, ...strokes].map(element => [element.id, element])).values())
+          await tx.room.update({ where: { id: roomId }, data: { canvasState: JSON.stringify(combined) } })
+        })
+        socket.to(roomId).emit('draw:ink-add', { strokes })
+        reply(true)
+      } catch (error) {
+        console.error('Error persisting handwriting:', error)
+        reply(false)
       }
     })
 

@@ -18,6 +18,51 @@ Built with Next.js 15, Socket.io, Prisma 7, and react-konva.
 - Live chat per room
 - Infinite canvas with pan and zoom
 - Rustic paper aesthetic
+- Touchpad writing pad — hold Space and glide without pressing the touchpad, undo draft strokes, then add ink to the shared canvas
+
+## Touchpad writing
+
+Open a room and choose **Writing pad** near the bottom right. Click inside the ruled pad,
+hold **Space**, and move your finger on the touchpad to write or sketch. Release Space
+between strokes and before lifting or repositioning your finger. Mouse drag, touch, and
+pen input also work. Undo or clear the private draft, then choose **Add to shared canvas**
+to place it in the current view and share it through the room's existing persistence and
+collaboration. Choose a visible, unlocked layer and connect to the room to insert ink.
+Closing the pad preserves its draft while the room stays mounted; reloading discards an
+unsubmitted draft. The pad uses the current toolbar colour and a capped ink width.
+
+This is a browser input mode intended for desktop browsers on macOS, Windows, and Linux;
+hardware/browser testing across those systems is still required. It uses cursor coordinates,
+so OS pointer acceleration still applies. Browsers do not provide a portable API for raw
+touchpad contact positions or finger lift. Some drivers suppress touchpad input while a key
+is held; use click-and-drag on those devices. No pressure sensitivity or handwriting-to-text
+is synthesized. This mode does not make a laptop touchpad equivalent to a pen tablet.
+
+### Product direction
+
+The proposed audience is students and tutors who want to write equations, annotate ideas,
+and explain them together using the laptop they already own. A focused promise to validate:
+**“Explain it in your own handwriting. No tablet needed.”** The existing shared room gives
+that workflow a foundation; usefulness and adoption still need validation with real users.
+
+Next milestones, not implemented features:
+
+1. Test the writing workflow with students and tutors on real laptops across all three OSes.
+   Measure time to write a legible equation, successful room sharing, and repeat use.
+2. Add explicit, previewable handwriting-to-text conversion that preserves the original ink,
+   plus equation recognition. Choose an engine after testing language coverage, accuracy,
+   cost, and local versus cloud privacy requirements.
+3. Prototype a native companion with one normalized contact-event interface and OS-specific
+   input adapters. macOS AppKit exposes `NSTouch` positions; Windows Precision Touchpad APIs
+   and Linux input access need separate compatibility and permission validation. A desktop
+   web wrapper alone does not supply raw touchpad input. Ship a tested support matrix rather
+   than claiming every laptop or OS is supported.
+4. Build an explain-and-replay workflow with tutor/student turns and reusable lesson pages.
+   Test whether users value saved lesson history enough to pay before introducing paid plans.
+
+Input references: [browser Pointer Events](https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events),
+[Apple trackpad events](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/EventOverview/HandlingTouchEvents/HandlingTouchEvents.html),
+[Windows Precision Touchpad APIs](https://learn.microsoft.com/en-us/windows/win32/input-precisiontouchpad/precision-touchpad-portal).
 
 ---
 
@@ -176,6 +221,7 @@ SQLite database is stored at `prisma/dev.db` locally, or in a Docker volume / Ku
 | `draw:stroke-start` | client ↔ server | Broadcast stroke start to other users |
 | `draw:stroke-update` | client ↔ server | Broadcast incremental stroke points |
 | `draw:stroke-end` | client ↔ server | Finalise stroke and persist to DB |
+| `draw:ink-add` | client ↔ server | Save a writing-pad draft in one transaction, acknowledge it, and broadcast it |
 | `canvas:clear` | client ↔ server | Clear the canvas for all users |
 | `cursor:move` | client ↔ server | Broadcast live cursor position |
 | `layer:update` | client ↔ server | Sync layer changes across users |

@@ -10,8 +10,11 @@ import type {
   LayerData, CursorData, CanvasType, GridType, DrawTool,
 } from '@/types/canvas'
 import { CANVAS_TYPE_CONFIG } from '@/types/canvas'
+import TouchpadPad from './TouchpadPad'
+import { placeInk, type InkStroke } from '@/lib/touchpad'
 
 interface InfiniteCanvasProps {
+  isConnected: boolean
   selectedTool: string
   brushSize: number
   brushColor: string
@@ -24,6 +27,7 @@ interface InfiniteCanvasProps {
   onStrokeStart: (stroke: StrokeData) => void
   onStrokeUpdate: (strokeId: string, points: number[], pressures?: number[]) => void
   onStrokeEnd: (stroke: StrokeData) => void
+  onInkAdd: (strokes: StrokeData[]) => Promise<boolean>
   onShapeAdd: (shape: ShapeData) => void
   onTextAdd: (text: TextData) => void
   onElementMove: (elementId: string, offsetX: number, offsetY: number) => void
@@ -259,9 +263,10 @@ function getElementBounds(el: CanvasElement): { x: number; y: number; w: number;
 
 // ── Main component ────────────────────────────────────────────────────────────
 const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
+  isConnected,
   selectedTool, brushSize, brushColor, fontSize, shapeFilled, selectedLayer,
   canvasElements, setCanvasElements,
-  cursors, onStrokeStart, onStrokeUpdate, onStrokeEnd,
+  cursors, onStrokeStart, onStrokeUpdate, onStrokeEnd, onInkAdd,
   onShapeAdd, onTextAdd, onElementMove, onCursorMove,
   layers, canvasType, gridType,
   selectedElementIds, onElementSelect, onElementsDelete,
@@ -808,6 +813,20 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   // ── Cursor style ─────────────────────────────────────────────────────────────
   const cursor = TOOL_CURSORS[selectedTool] ?? 'crosshair'
 
+  const writingLayer = layers.find(layer => layer.id === selectedLayer)
+  const writingDisabledReason = !isConnected ? 'Reconnect before adding your draft. You can keep writing here.'
+    : !writingLayer || writingLayer.locked || !writingLayer.visible
+      ? 'Select a visible, unlocked layer before adding your draft.' : undefined
+
+  const insertHandwriting = async (draft: InkStroke[]) => {
+    if (writingDisabledReason) return false
+    const center = toWorld(stageSize.width / 2, stageSize.height / 2)
+    const strokes: StrokeData[] = placeInk(draft, center, scaleRef.current).map(ink => ({
+      ...ink, id: ink.id ?? crypto.randomUUID(), type: 'stroke', tool: 'pen', layerId: selectedLayer,
+    }))
+    return onInkAdd(strokes)
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div
@@ -815,6 +834,8 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       className={`w-full h-full touch-none select-none relative overflow-hidden ${isDark ? 'paper-grain-dark' : 'paper-grain paper-vignette'}`}
       style={{ backgroundColor: config.bg, cursor }}
     >
+      <TouchpadPad color={brushColor} size={brushSize}
+        disabledReason={writingDisabledReason} onInsert={insertHandwriting} />
       <Stage
         ref={stageRef}
         width={stageSize.width}
