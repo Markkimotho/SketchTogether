@@ -90,6 +90,10 @@ npm run dev
 
 Opens at `http://localhost:3000`. Do not use `next dev` — the custom `server.ts` is required for Socket.io.
 
+Development output goes to `.next-dev`; production builds and `npm start` use `.next`.
+This lets `npm run build` run without overwriting a running development server's chunks.
+After changing this configuration, restart `npm run dev` once to use the separate cache.
+
 > **Note:** The server auto-bootstraps the SQLite database on first start by applying any pending migration SQL, so `prisma migrate dev` is not required for local development.
 
 ---
