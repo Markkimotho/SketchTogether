@@ -118,6 +118,9 @@ npm run dev
 
 Opens at `http://localhost:3000`. Do not use `next dev` — the custom `server.ts` is required for Socket.io.
 
+The dev command watches the custom server and its imported modules, automatically restarting
+when server handlers change. Build output and SQLite files are excluded from that watcher.
+
 Development output goes to `.next-dev`; production builds and `npm start` use `.next`.
 This lets `npm run build` run without overwriting a running development server's chunks.
 After changing this configuration, restart `npm run dev` once to use the separate cache.

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npx tsx server.ts",
+    "dev": "tsx watch --clear-screen=false --exclude './.next/**' --exclude './.next-dev/**' --exclude './prisma/*.db*' server.ts",
     "build": "next build",
     "start": "NODE_ENV=production npx tsx server.ts",
     "lint": "next lint",

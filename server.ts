@@ -75,6 +75,7 @@ bootstrapDb().then(() => app.prepare()).then(() => {
 
         if (room) {
           socket.emit('room:state', {
+            capabilities: { canvasEdits: 1 },
             canvasState: room.canvasState,
             layers: room.layers,
             versions: room.versions,

@@ -50,6 +50,7 @@ try {
   }
   const first = await join('Writer')
   const second = await join('Viewer')
+  assert.equal(first.state.capabilities?.canvasEdits, 1, 'Room handshake must advertise the editing protocol')
   const layerId = first.state.layers[0].id
   const mark = (id, target = layerId) => ({ id, type: 'stroke', tool: 'pen', points: [10, 10, 50, 40], color: '#123456', size: 2, layerId: target })
   const read = () => JSON.parse(database.prepare('SELECT canvasState FROM Room WHERE id = ?').get(roomId).canvasState)

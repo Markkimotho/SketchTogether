@@ -30,6 +30,7 @@ export default function CanvasRoom({
   roomId, initialCanvasState, initialLayers, initialVersions, initialChat,
 }: CanvasRoomProps) {
   const socketRef = useRef<Socket | null>(null)
+  const roomReadyRef = useRef(false)
   const [userName, setUserName]       = useState('')
   const [isConnected, setIsConnected] = useState(false)
   const [userCount, setUserCount]     = useState(1)
@@ -100,11 +101,16 @@ export default function CanvasRoom({
     socketRef.current = socket
 
     socket.on('connect', () => {
-      setIsConnected(true)
+      roomReadyRef.current = false
+      setIsConnected(false)
       socket.emit('room:join', { roomId, userName: name })
     })
 
-    socket.on('room:state', ({ canvasState, layers: serverLayers, versions: serverVersions, chat: serverChat }) => {
+    socket.on('room:state', ({ canvasState, layers: serverLayers, versions: serverVersions, chat: serverChat, capabilities }) => {
+      const supported = capabilities?.canvasEdits === 1
+      roomReadyRef.current = supported
+      setIsConnected(supported)
+      setEditError(supported ? '' : 'The server is running an older version. Restart npm run dev, then reconnect.')
       try {
         const parsed: CanvasElement[] = JSON.parse(canvasState)
         const deduped = Array.from(new Map(parsed.map(el => [el.id, el])).values())
@@ -183,7 +189,12 @@ export default function CanvasRoom({
     socket.on('chat:message', (message: ChatMessage) => {
       setChat(prev => [...prev, { ...message, createdAt: new Date(message.createdAt as string).toISOString() }])
     })
-    socket.on('disconnect', () => setIsConnected(false))
+    socket.on('disconnect', () => { roomReadyRef.current = false; setIsConnected(false) })
+    socket.on('connect_error', () => {
+      roomReadyRef.current = false
+      setIsConnected(false)
+      setEditError('Cannot reach the server. Check that npm run dev is running, then reconnect.')
+    })
 
     return () => { socket.disconnect() }
   }, [roomId])
@@ -191,6 +202,10 @@ export default function CanvasRoom({
   const commitCanvasEdit = useCallback(async (edit: CanvasEdit): Promise<CanvasDelta | null> => {
     const socket = socketRef.current
     if (!socket?.connected) { setEditError('Reconnect to save your edit.'); return null }
+    if (!roomReadyRef.current) {
+      setEditError('The editing server is not ready. Restart npm run dev if it is outdated, then reconnect.')
+      return null
+    }
     setEditPending(count => count + 1)
     setEditError('')
     try {
@@ -199,7 +214,7 @@ export default function CanvasRoom({
       setCanvasElements(prev => mergeCanvasDelta(prev, reply.delta))
       return reply.delta
     } catch {
-      setEditError('Could not confirm the save. Reconnect before trying again.')
+      setEditError('The server did not confirm this save. Reconnect to check the saved canvas before trying again.')
       return null
     } finally { setEditPending(count => count - 1) }
   }, [roomId])
@@ -405,6 +420,12 @@ export default function CanvasRoom({
 
       {editError && <div role="alert" className="fixed bottom-5 left-5 z-40 max-w-sm rounded-xl glass-strong p-3 text-sm text-amber-100">
         {editError}
+        <button type="button" onClick={() => {
+          roomReadyRef.current = false
+          setIsConnected(false)
+          setEditError('Reconnecting…')
+          socketRef.current?.disconnect().connect()
+        }} className="ml-3 underline">Reconnect</button>
         <button type="button" aria-label="Dismiss save error" onClick={() => setEditError('')} className="ml-3 underline">Dismiss</button>
       </div>}
 
