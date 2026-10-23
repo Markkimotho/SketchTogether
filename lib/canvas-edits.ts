@@ -1,6 +1,7 @@
 import type { CanvasElement, LayerData } from '../types/canvas'
 
 export interface CanvasEdit {
+  expected?: CanvasElement[]
   deleteIds?: string[]
   add?: CanvasElement[]
   clear?: boolean
@@ -33,6 +34,13 @@ export function applyCanvasEdit(elements: CanvasElement[], layers: LayerData[], 
   if (!edit || typeof edit !== 'object'
     || (edit.deleteIds !== undefined && (!Array.isArray(edit.deleteIds) || !edit.deleteIds.every(id => typeof id === 'string')))
     || (edit.add !== undefined && (!Array.isArray(edit.add) || !edit.add.every(isCanvasElement)))) throw new Error('Invalid canvas edit')
+  if (edit.expected !== undefined && (!Array.isArray(edit.expected) || !edit.expected.every(isCanvasElement))) throw new Error('Invalid expected artwork')
+  const fingerprint = (element: CanvasElement) => JSON.stringify(Object.entries(element).filter(([key]) => key !== 'remote' && key !== 'pending').sort(([a], [b]) => a.localeCompare(b)))
+  for (const expected of edit.expected ?? []) {
+    const current = elements.find(element => element.id === expected.id)
+    if (!layers.some(layer => layer.id === expected.layerId && layer.visible && !layer.locked)) throw new Error('Choose a visible, unlocked layer')
+    if (!current || fingerprint(current) !== fingerprint(expected)) throw new Error('That artwork has changed. Undo cannot overwrite another edit.')
+  }
   const editable = new Set(layers.filter(layer => layer.visible && !layer.locked).map(layer => layer.id))
   const ids = new Set(edit.deleteIds ?? [])
   const removed = elements.filter(element => editable.has(element.layerId)
@@ -71,4 +79,9 @@ export class RoomMutationQueue {
     void task.finally(() => { if (this.pending.get(roomId) === task) this.pending.delete(roomId) }).catch(() => {})
     return task
   }
+}
+
+export function duplicateElements(elements: CanvasElement[], newId: () => string): CanvasElement[] {
+  return elements.map(element => ({ ...element, id: newId(), offsetX: (element.offsetX ?? 0) + 24, offsetY: (element.offsetY ?? 0) + 24,
+    ...(element.type === 'stroke' ? { points: [...element.points], pending: false, remote: false } : {}) }))
 }

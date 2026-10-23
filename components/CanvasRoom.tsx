@@ -7,7 +7,10 @@ import InfiniteCanvas from './InfiniteCanvas'
 import ToolBar from './ToolBar'
 import CollapsibleSidebar from './CollapsibleSidebar'
 import HamburgerMenu from './HamburgerMenu'
-import { editableElements, mergeCanvasDelta, type CanvasEdit, type CanvasDelta, type EditReply } from '@/lib/canvas-edits'
+import type { ElementMove } from '@/lib/selection'
+import { useCanvasHistory } from '@/lib/use-canvas-history'
+import { TOOLS, isEditingText } from '@/lib/toolbox'
+import { duplicateElements, editableElements, mergeCanvasDelta, type CanvasEdit, type CanvasDelta, type EditReply } from '@/lib/canvas-edits'
 import type {
   CanvasElement, LayerData, VersionData, ChatMessage,
   CursorData, StrokeData, ShapeData, TextData,
@@ -42,9 +45,24 @@ export default function CanvasRoom({
   // Tool state
   const [selectedTool, setSelectedTool] = useState('brush')
   const [brushSize, setBrushSize]       = useState(5)
+  const [brushOpacity, setBrushOpacity] = useState(1)
   const [brushColor, setBrushColor]     = useState('#1a1410')
   const [fontSize, setFontSize]         = useState(24)
   const [shapeFilled, setShapeFilled]   = useState(true)
+
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || isEditingText(event.target)) return
+      const tool = TOOLS.find(tool => tool.key.toLowerCase() === event.key.toLowerCase())
+      if (tool) { event.preventDefault(); setSelectedTool(tool.id) }
+      if (event.key === '[' || event.key === ']') {
+        event.preventDefault()
+        setBrushSize(size => Math.max(1, Math.min(80, size + (event.key === ']' ? 1 : -1))))
+      }
+    }
+    document.addEventListener('keydown', shortcut)
+    return () => document.removeEventListener('keydown', shortcut)
+  }, [])
 
   // Canvas appearance
   const [canvasType, setCanvasType] = useState<CanvasType>('plain')
@@ -121,7 +139,7 @@ export default function CanvasRoom({
     })
     socket.on('canvas:edited', ({ delta }: { delta: CanvasDelta }) => {
       setCanvasElements(prev => mergeCanvasDelta(prev, delta))
-      setSelectedElementIds(prev => prev.filter(id => !delta.removed.some(element => element.id === id)))
+      setSelectedElementIds(prev => prev.filter(id => !delta.removed.some(element => element.id === id) || delta.added.some(element => element.id === id)))
     })
     socket.on('draw:ink-add', ({ strokes }: { strokes: StrokeData[] }) => {
       setCanvasElements(prev => Array.from(new Map([...prev, ...strokes].map(stroke => [stroke.id, stroke])).values()))
@@ -186,6 +204,13 @@ export default function CanvasRoom({
     } finally { setEditPending(count => count - 1) }
   }, [roomId])
 
+  const { record, reset: resetHistory, undo, redo, canUndo, canRedo, busy: historyBusy } = useCanvasHistory(commitCanvasEdit)
+  const runEdit = useCallback(async (edit: CanvasEdit, label: string) => {
+    const delta = await commitCanvasEdit(edit)
+    if (delta) record(delta, label)
+    return delta
+  }, [commitCanvasEdit, record])
+
   const emitStrokeStart = useCallback((stroke: StrokeData) => {
     socketRef.current?.emit('draw:stroke-start', { roomId, stroke })
   }, [roomId])
@@ -193,20 +218,24 @@ export default function CanvasRoom({
     socketRef.current?.emit('draw:stroke-update', { roomId, strokeId, points, pressures })
   }, [roomId])
   const emitStrokeEnd = useCallback((stroke: StrokeData) => {
-    void commitCanvasEdit({ add: [stroke] })
-  }, [commitCanvasEdit])
+    void runEdit({ add: [stroke] }, 'stroke')
+  }, [runEdit])
   const emitInkAdd = useCallback(async (strokes: StrokeData[]) => {
-    return (await commitCanvasEdit({ add: strokes })) !== null
-  }, [commitCanvasEdit])
+    return (await runEdit({ add: strokes }, 'handwriting')) !== null
+  }, [runEdit])
   const emitShapeAdd = useCallback((shape: ShapeData) => {
-    void commitCanvasEdit({ add: [shape] })
-  }, [commitCanvasEdit])
+    void runEdit({ add: [shape] }, 'shape')
+  }, [runEdit])
   const emitTextAdd = useCallback((text: TextData) => {
-    void commitCanvasEdit({ add: [text] })
-  }, [commitCanvasEdit])
-  const emitElementMove  = useCallback((elementId: string, offsetX: number, offsetY: number) => {
-    socketRef.current?.emit('draw:element-move', { roomId, elementId, offsetX, offsetY })
-  }, [roomId])
+    void runEdit({ add: [text] }, 'text')
+  }, [runEdit])
+  const emitElementsMove = useCallback((moves: ElementMove[]) => {
+    void runEdit({ deleteIds: moves.map(move => move.before.id),
+      add: moves.map(move => ({ ...move.before, offsetX: move.offsetX, offsetY: move.offsetY })),
+      expected: moves.map(move => move.before) }, 'move').then(delta => {
+      if (!delta) socketRef.current?.emit('room:join', { roomId, userName })
+    })
+  }, [runEdit, roomId, userName])
   const emitCursorMove   = useCallback((x: number, y: number) => {
     socketRef.current?.emit('cursor:move', { roomId, x, y, userName })
   }, [roomId, userName])
@@ -228,9 +257,9 @@ export default function CanvasRoom({
 
   const handleElementsDelete = useCallback(async (ids: string[]) => {
     if (!ids.length) return
-    const delta = await commitCanvasEdit({ deleteIds: ids })
+    const delta = await runEdit({ deleteIds: ids }, 'delete')
     if (delta) setSelectedElementIds([])
-  }, [commitCanvasEdit])
+  }, [runEdit])
 
   const handleLayerAdd    = useCallback(() => {
     const layer: LayerData = {
@@ -259,12 +288,47 @@ export default function CanvasRoom({
     socketRef.current?.emit('chat:send', { roomId, text, author: userName })
   }, [roomId, userName])
   const handleClearCanvas = useCallback(async (layerId?: string) => {
-    const delta = await commitCanvasEdit({ clear: true, layerId })
+    const delta = await runEdit({ clear: true, layerId }, 'clear')
     if (delta) setSelectedElementIds([])
-  }, [commitCanvasEdit])
+  }, [runEdit])
 
   const editable = editableElements(canvasElements, layers)
   const deletableSelection = editable.filter(element => selectedElementIds.includes(element.id))
+
+  const selectAll = useCallback(() => {
+    setSelectedTool('select')
+    setSelectedElementIds(editableElements(canvasElements, layers).map(element => element.id))
+  }, [canvasElements, layers])
+  const duplicateSelection = useCallback(async () => {
+    const elements = editableElements(canvasElements, layers).filter(element => selectedElementIds.includes(element.id))
+    if (!elements.length) return
+    const delta = await runEdit({ add: duplicateElements(elements, () => crypto.randomUUID()) }, 'duplicate')
+    if (delta) { setSelectedTool('select'); setSelectedElementIds(delta.added.map(element => element.id)) }
+  }, [canvasElements, layers, selectedElementIds, runEdit])
+
+  useEffect(() => {
+    const socket = socketRef.current
+    const reset = () => resetHistory()
+    socket?.on('version:reverted', reset)
+    socket?.on('disconnect', reset)
+    return () => { socket?.off('version:reverted', reset); socket?.off('disconnect', reset) }
+  }, [resetHistory])
+
+  useEffect(() => {
+    const keyboardEdit = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || event.isComposing || isEditingText(event.target) || editPending || historyBusy) return
+      if (!event.ctrlKey && !event.metaKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'a') { event.preventDefault(); selectAll() }
+      if (key === 'd') { event.preventDefault(); void duplicateSelection() }
+      if (key === 'z' || key === 'y') {
+        event.preventDefault()
+        if (key === 'y' || event.shiftKey) void redo(); else void undo()
+      }
+    }
+    document.addEventListener('keydown', keyboardEdit)
+    return () => document.removeEventListener('keydown', keyboardEdit)
+  }, [selectAll, duplicateSelection, undo, redo, editPending, historyBusy])
 
   return (
     <motion.div
@@ -277,6 +341,7 @@ export default function CanvasRoom({
         <InfiniteCanvas
           isConnected={isConnected}
           selectedTool={selectedTool}
+          brushOpacity={brushOpacity}
           brushSize={brushSize}
           brushColor={brushColor}
           fontSize={fontSize}
@@ -291,7 +356,7 @@ export default function CanvasRoom({
           onInkAdd={emitInkAdd}
           onShapeAdd={emitShapeAdd}
           onTextAdd={emitTextAdd}
-          onElementMove={emitElementMove}
+          onElementsMove={emitElementsMove}
           onCursorMove={emitCursorMove}
           layers={layers}
           canvasType={canvasType}
@@ -309,6 +374,8 @@ export default function CanvasRoom({
         setSelectedTool={setSelectedTool}
         brushSize={brushSize}
         setBrushSize={setBrushSize}
+        brushOpacity={brushOpacity}
+        setBrushOpacity={setBrushOpacity}
         brushColor={brushColor}
         setBrushColor={setBrushColor}
         fontSize={fontSize}
@@ -319,7 +386,17 @@ export default function CanvasRoom({
         onDelete={() => { void handleElementsDelete(deletableSelection.map(element => element.id)) }}
         selectedCount={deletableSelection.length}
         canClear={editable.length > 0}
-        editPending={editPending > 0}
+        editPending={editPending > 0 || historyBusy}
+        layerName={layers.find(layer => layer.id === selectedLayer)?.name ?? 'Choose a layer'}
+        layerId={selectedLayer}
+        layerLocked={!layers.some(layer => layer.id === selectedLayer && !layer.locked && layer.visible)}
+        canClearLayer={editable.some(element => element.layerId === selectedLayer)}
+        onSelectAll={selectAll}
+        onDuplicate={() => { void duplicateSelection() }}
+        onUndo={() => { void undo() }}
+        onRedo={() => { void redo() }}
+        canUndo={canUndo}
+        canRedo={canRedo}
         isConnected={isConnected}
         userCount={userCount}
         leftNavOpen={leftNavOpen}

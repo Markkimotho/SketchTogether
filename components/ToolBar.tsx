@@ -1,370 +1,227 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
-  Pencil, Pen, Paintbrush, Eraser, Square, Circle, Hand,
-  Minus, Type, MousePointer2, Users, Trash2, Feather,
-  PaintBucket, SquareDashed, SquareX,
+  Pencil, Pen, Paintbrush, Eraser, Square, Circle, Hand, Minus, Type, MousePointer2,
+  Users, Trash2, Feather, PaintBucket, SquareDashed, Undo2, Redo2, Copy,
+  SquareMousePointer, ChevronDown, SlidersHorizontal, Lock, Keyboard,
 } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { Slider } from '@/components/ui/slider'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { motion } from 'framer-motion'
+import { COLORS, INK_PRESETS, TOOLS } from '@/lib/toolbox'
 
 interface ToolBarProps {
   selectedTool: string
-  setSelectedTool: React.Dispatch<React.SetStateAction<string>>
+  setSelectedTool: (tool: string) => void
   brushSize: number
-  setBrushSize: React.Dispatch<React.SetStateAction<number>>
+  setBrushSize: (size: number) => void
   brushColor: string
-  setBrushColor: React.Dispatch<React.SetStateAction<string>>
+  setBrushColor: (color: string) => void
+  brushOpacity: number
+  setBrushOpacity: (opacity: number) => void
   fontSize: number
-  setFontSize: React.Dispatch<React.SetStateAction<number>>
+  setFontSize: (size: number) => void
   shapeFilled: boolean
-  setShapeFilled: React.Dispatch<React.SetStateAction<boolean>>
-  onClear: () => void
+  setShapeFilled: (filled: boolean) => void
+  onClear: (layerId?: string) => void
   onDelete: () => void
   selectedCount: number
   canClear: boolean
   editPending: boolean
   isConnected: boolean
   userCount: number
+  layerName: string
+  layerId: string
+  layerLocked: boolean
+  canClearLayer: boolean
+  onSelectAll?: () => void
+  onDuplicate?: () => void
+  onUndo?: () => void
+  onRedo?: () => void
+  canUndo?: boolean
+  canRedo?: boolean
   leftNavOpen?: boolean
   rightNavOpen?: boolean
 }
 
-const TOOL_GROUPS = [
-  [
-    { id: 'pencil',      icon: Pencil,        label: 'Pencil'      },
-    { id: 'pen',         icon: Pen,           label: 'Ink Pen'     },
-    { id: 'brush',       icon: Paintbrush,    label: 'Brush'       },
-    { id: 'calligraphy', icon: Feather,       label: 'Calligraphy' },
-    { id: 'eraser',      icon: Eraser,        label: 'Eraser'      },
-  ],
-  [
-    { id: 'line',        icon: Minus,         label: 'Line'        },
-    { id: 'rectangle',   icon: Square,        label: 'Rectangle'   },
-    { id: 'circle',      icon: Circle,        label: 'Circle'      },
-  ],
-  [
-    { id: 'text',        icon: Type,          label: 'Text'        },
-    { id: 'select',      icon: MousePointer2, label: 'Select / Move' },
-    { id: 'hand',        icon: Hand,          label: 'Pan'         },
-  ],
-]
+const ICONS = { pencil: Pencil, pen: Pen, brush: Paintbrush, calligraphy: Feather, eraser: Eraser,
+  line: Minus, rectangle: Square, circle: Circle, text: Type, select: MousePointer2, hand: Hand }
 
-const PRESET_COLORS = [
-  '#1a1a10', '#2d3a1a',
-  '#4a6741', '#8b6914',
-  '#6b2d1a', '#3d2b1f',
-  '#2a3d32', '#5c3d2e',
-  '#1e2f1a', '#c4a35a',
-  '#7a5c3a', '#3a4a2a',
-]
+export default function ToolBar(props: ToolBarProps) {
+  const { selectedTool, setSelectedTool, brushSize, setBrushSize, brushColor, setBrushColor,
+    brushOpacity, setBrushOpacity, fontSize, setFontSize, shapeFilled, setShapeFilled,
+    selectedCount, editPending, isConnected, userCount, layerName, layerLocked } = props
+  const [collapsed, setCollapsed] = useState(false)
+  const [recentColors, setRecentColors] = useState<string[]>([])
+  const toolsRef = useRef<HTMLDivElement | null>(null)
+  const active = TOOLS.find(tool => tool.id === selectedTool) ?? TOOLS[2]
+  const Icon = ICONS[active.id]
+  const isShape = selectedTool === 'rectangle' || selectedTool === 'circle'
+  const isInk = active.group === 'draw' || selectedTool === 'line'
+  const busy = editPending || !isConnected
 
-export default function ToolBar({
-  selectedTool, setSelectedTool,
-  brushSize, setBrushSize,
-  brushColor, setBrushColor,
-  fontSize, setFontSize,
-  shapeFilled, setShapeFilled,
-  onClear, onDelete, selectedCount, canClear, editPending, isConnected, userCount,
-  leftNavOpen = false, rightNavOpen = false,
-}: ToolBarProps) {
-
-  // Shift toolbar away from open panels
-  const desktopX = (leftNavOpen ? 130 : 0) + (rightNavOpen ? -160 : 0)
+  useEffect(() => {
+    setRecentColors(previous => previous[0] === brushColor ? previous : [brushColor, ...previous.filter(color => color !== brushColor)].slice(0, 6))
+  }, [brushColor])
 
   return (
-    <TooltipProvider delayDuration={300}>
-      {/* ── Desktop: horizontal pill at top center ── */}
-      <div className="fixed z-30 hidden md:flex top-4 left-0 right-0 justify-center pointer-events-none">
-        <motion.div
-          initial={{ y: -60, opacity: 0 }}
-          animate={{ y: 0, opacity: 1, x: desktopX }}
-          transition={{ type: 'spring', stiffness: 300, damping: 28, delay: 0.1 }}
-          className="studio-toolbar pointer-events-auto flex flex-row items-center gap-0.5 p-1.5 rounded-xl glass-strong shadow-2xl"
-        >
-          {TOOL_GROUPS.map((group, gi) => (
-            <React.Fragment key={gi}>
-              {gi > 0 && <div className="w-px h-6 bg-white/10 mx-1" />}
-              {group.map(tool => (
-                <ToolBtn key={tool.id} tool={tool} selected={selectedTool === tool.id}
-                  onSelect={setSelectedTool} layout="row" />
-              ))}
-            </React.Fragment>
-          ))}
-
-          <div className="w-px h-6 bg-white/10 mx-1" />
-          <ColorPicker brushColor={brushColor} setBrushColor={setBrushColor} layout="row" />
-          <SizePicker
-            brushSize={brushSize} setBrushSize={setBrushSize}
-            fontSize={fontSize} setFontSize={setFontSize}
-            showText={selectedTool === 'text'}
-          />
-          {(selectedTool === 'rectangle' || selectedTool === 'circle') && (
-            <FillToggle filled={shapeFilled} setFilled={setShapeFilled} layout="row" />
-          )}
-
-          <div className="w-px h-6 bg-white/10 mx-1" />
-          <button type="button" aria-label="Delete selected objects" title={`Delete ${selectedCount} selected`}
-            disabled={!selectedCount || editPending || !isConnected} onClick={onDelete}
-            className="p-2 text-red-300 disabled:opacity-30"><Trash2 size={16} /></button>
-          <ClearCanvasButton disabled={!canClear || editPending || !isConnected} onClear={onClear} />
-          <StatusBadge isConnected={isConnected} userCount={userCount} />
-        </motion.div>
-      </div>
-
-      {/* ── Mobile: vertical pill on left side ── */}
-      <div className="fixed z-30 flex md:hidden left-3 top-0 bottom-0 items-center pointer-events-none">
-        <motion.div
-          initial={{ x: -60, opacity: 0 }}
-          animate={{ x: 0, opacity: leftNavOpen ? 0 : 1 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 28, delay: 0.15 }}
-          className="studio-toolbar pointer-events-auto flex flex-col items-center gap-0.5 p-1.5 rounded-xl glass-strong shadow-2xl"
-          style={{ pointerEvents: leftNavOpen ? 'none' : 'auto' }}
-        >
-          {TOOL_GROUPS.map((group, gi) => (
-            <React.Fragment key={gi}>
-              {gi > 0 && <div className="h-px w-6 bg-white/10 my-0.5" />}
-              {group.map(tool => (
-                <ToolBtn key={tool.id} tool={tool} selected={selectedTool === tool.id}
-                  onSelect={setSelectedTool} layout="col" />
-              ))}
-            </React.Fragment>
-          ))}
-
-          <div className="h-px w-6 bg-white/10 my-0.5" />
-          <ColorPicker brushColor={brushColor} setBrushColor={setBrushColor} layout="col" />
-          <SizePicker
-            brushSize={brushSize} setBrushSize={setBrushSize}
-            fontSize={fontSize} setFontSize={setFontSize}
-            showText={selectedTool === 'text'}
-          />
-          {(selectedTool === 'rectangle' || selectedTool === 'circle') && (
-            <FillToggle filled={shapeFilled} setFilled={setShapeFilled} layout="col" />
-          )}
-
-          <div className="h-px w-6 bg-white/10 my-0.5" />
-          <button type="button" aria-label="Delete selected objects" title={`Delete ${selectedCount} selected`}
-            disabled={!selectedCount || editPending || !isConnected} onClick={onDelete}
-            className="p-2 text-red-300 disabled:opacity-30"><Trash2 size={16} /></button>
-          <ClearCanvasButton disabled={!canClear || editPending || !isConnected} onClear={onClear} />
-          <StatusBadge isConnected={isConnected} userCount={userCount} />
-        </motion.div>
-      </div>
-    </TooltipProvider>
-  )
-}
-
-// ── Sub-components ───────────────────────────────────────────────────────────
-
-function ToolBtn({
-  tool, selected, onSelect, layout,
-}: {
-  tool: { id: string; icon: React.ElementType; label: string }
-  selected: boolean
-  onSelect: (id: string) => void
-  layout: 'row' | 'col'
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <motion.button
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-          onClick={() => onSelect(tool.id)}
-          className={`
-            relative p-2 rounded-lg transition-colors
-            min-w-[36px] min-h-[36px] flex items-center justify-center
-            ${selected ? 'text-white' : 'text-white/45 hover:text-white/75 hover:bg-white/5'}
-          `}
-        >
-          {selected && (
-            <motion.div
-              layoutId={`activeTool_${layout}`}
-              className="absolute inset-0 rounded-lg bg-primary/25 border border-primary/35"
-              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            />
-          )}
-          <tool.icon className="h-[15px] w-[15px] relative z-10" strokeWidth={1.8} />
-        </motion.button>
-      </TooltipTrigger>
-      <TooltipContent side={layout === 'col' ? 'right' : 'bottom'} className="text-xs">
-        {tool.label}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-function ColorPicker({
-  brushColor, setBrushColor, layout,
-}: {
-  brushColor: string
-  setBrushColor: (c: string) => void
-  layout: 'row' | 'col'
-}) {
-  return (
-    <Popover>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <motion.button
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
-              className="p-2 rounded-lg hover:bg-white/5 transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center"
-            >
-              <div
-                className="w-4 h-4 rounded-full border border-white/25 shadow-inner"
-                style={{ backgroundColor: brushColor }}
-              />
-            </motion.button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side={layout === 'col' ? 'right' : 'bottom'} className="text-xs">Colour</TooltipContent>
-      </Tooltip>
-      <PopoverContent
-        side={layout === 'col' ? 'right' : 'bottom'}
-        className="w-52 p-3 glass-panel border-white/8 shadow-2xl"
-      >
-        <div className="grid grid-cols-6 gap-1.5 mb-3">
-          {PRESET_COLORS.map((color) => (
-            <button
-              key={color}
-              onClick={() => setBrushColor(color)}
-              className={`w-6 h-6 rounded-full transition-transform hover:scale-110 border-2 ${
-                brushColor === color ? 'border-white/80 scale-110' : 'border-transparent'
-              }`}
-              style={{ backgroundColor: color }}
-            />
-          ))}
-        </div>
-        <input
-          type="color"
-          value={brushColor}
-          onChange={(e) => setBrushColor(e.target.value)}
-          className="w-full h-7 rounded cursor-pointer bg-transparent"
-        />
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-function SizePicker({
-  brushSize, setBrushSize, fontSize, setFontSize, showText,
-}: {
-  brushSize: number
-  setBrushSize: (s: number) => void
-  fontSize: number
-  setFontSize: (s: number) => void
-  showText: boolean
-}) {
-  return (
-    <Popover>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <motion.button
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
-              className="p-2 rounded-lg hover:bg-white/5 transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center"
-            >
-              <div
-                className="rounded-full bg-foreground/60"
-                style={{
-                  width:  Math.max(3, Math.min(14, brushSize * 0.5)),
-                  height: Math.max(3, Math.min(14, brushSize * 0.5)),
-                }}
-              />
-            </motion.button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent className="text-xs">Size</TooltipContent>
-      </Tooltip>
-      <PopoverContent className="w-52 p-3 glass-panel border-white/8 shadow-2xl space-y-4">
-        <div>
-          <p className="rustic-label text-white/40 mb-2">Stroke: {brushSize}px</p>
-          <Slider
-            min={1} max={80} step={1}
-            value={[brushSize]}
-            onValueChange={(v) => setBrushSize(v[0])}
-          />
-        </div>
-        {showText && (
-          <div>
-            <p className="rustic-label text-white/40 mb-2">Font size: {fontSize}px</p>
-            <Slider
-              min={8} max={120} step={2}
-              value={[fontSize]}
-              onValueChange={(v) => setFontSize(v[0])}
-            />
+    <div className={`toolbox-position ${props.leftNavOpen ? 'toolbox-nav-open' : ''}`}>
+      <section className="toolbox glass-strong" aria-label="Artist toolbox">
+        <header className="toolbox-header">
+          <button type="button" className="toolbox-heading" aria-expanded={!collapsed} aria-controls="toolbox-controls"
+            onClick={() => setCollapsed(value => !value)}>
+            <Feather size={15} /><span>The toolshed</span><ChevronDown size={13} className={collapsed ? '-rotate-90' : ''} />
+          </button>
+          <span className="toolbox-current"><Icon size={13} />{active.label}</span>
+          <div className="toolbox-connection" role="status" title={isConnected ? 'Connected to the shared room' : 'Reconnecting to the room'}>
+            <span className={isConnected ? 'is-connected' : ''} />
+            <Users size={12} />{userCount}<span className="hidden sm:inline">{isConnected ? 'in the studio' : '· reconnecting'}</span>
           </div>
-        )}
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-function StatusBadge({ isConnected, userCount }: { isConnected: boolean; userCount: number }) {
-  return (
-    <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-white/5 min-h-[36px]">
-      <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-400' : 'bg-red-400'}`} />
-      <Users className="h-3 w-3 text-white/35" strokeWidth={1.8} />
-      <span className="text-xs text-white/45 font-medium tabular-nums">{userCount}</span>
+        </header>
+        {!collapsed && <div id="toolbox-controls">
+          <div ref={toolsRef} role="toolbar" aria-label="Drawing tools" className="toolbox-tools"
+            onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+              const buttons = Array.from(toolsRef.current?.querySelectorAll<HTMLButtonElement>('[data-tool]') ?? [])
+              const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+              if (index < 0) return
+              event.preventDefault()
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+                : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length
+              buttons[next]?.focus()
+            }}>
+            {(['draw', 'shape', 'navigate'] as const).map(group => <div key={group} role="group"
+              aria-label={group === 'draw' ? 'Ink and eraser' : group === 'shape' ? 'Lines and shapes' : 'Text and navigation'} className="toolbox-group">
+              {TOOLS.filter(tool => tool.group === group).map(tool => {
+                const ToolIcon = ICONS[tool.id]
+                return <button key={tool.id} type="button" data-tool={tool.id} aria-label={tool.label}
+                  aria-pressed={selectedTool === tool.id} aria-keyshortcuts={tool.key.toLowerCase()}
+                  title={`${tool.label} (${tool.key}) — ${tool.hint}`} className="toolbox-tool"
+                  onClick={() => setSelectedTool(tool.id)}>
+                  <ToolIcon size={18} strokeWidth={1.6} /><span>{tool.label}</span>
+                </button>
+              })}
+            </div>)}
+          </div>
+          <div className="toolbox-properties" aria-label={`${active.label} settings`}>
+            {(isInk || isShape || selectedTool === 'text') && <>
+              {selectedTool !== 'eraser' && <Popover>
+                <PopoverTrigger asChild><button type="button" className="toolbox-property" aria-label="Choose ink colour" title="Ink colour">
+                  <span className="toolbox-swatch" style={{ backgroundColor: brushColor }} /><span className="hidden sm:inline">Ink</span><ChevronDown size={12} />
+                </button></PopoverTrigger>
+                <PopoverContent className="toolbox-popover glass-panel" align="start">
+                  <p className="rustic-label mb-3">Earth &amp; pigment</p>
+                  <div className="grid grid-cols-6 gap-2">
+                    {COLORS.map(([name, color]) => <button key={color} type="button" aria-label={name} aria-pressed={brushColor === color}
+                      title={name} className="toolbox-colour" style={{ backgroundColor: color }} onClick={() => setBrushColor(color)} />)}
+                  </div>
+                  <p className="rustic-label mt-4 mb-2">Recently used</p>
+                  <div className="flex gap-2">{recentColors.map(color => <button key={color} type="button" aria-label={`Recent colour ${color}`}
+                    className="toolbox-colour" style={{ backgroundColor: color }} onClick={() => setBrushColor(color)} />)}</div>
+                  <label className="mt-4 flex items-center justify-between text-xs">Custom ink
+                    <input aria-label="Custom ink colour" type="color" value={brushColor} onChange={event => setBrushColor(event.target.value)} className="h-8 w-12 cursor-pointer bg-transparent" />
+                  </label>
+                </PopoverContent>
+              </Popover>}
+              <Popover>
+                <PopoverTrigger asChild><button type="button" className="toolbox-property" aria-label="Tool settings">
+                  <SlidersHorizontal size={14} /><span>{selectedTool === 'text' ? fontSize : brushSize}px</span><ChevronDown size={12} />
+                </button></PopoverTrigger>
+                <PopoverContent className="toolbox-popover glass-panel space-y-4" align="start">
+                  <div className="toolbox-stroke-preview" aria-hidden="true">
+                    <svg viewBox="0 0 220 52"><path d="M12 35 C48 4 70 48 108 26 S164 5 208 28" fill="none" stroke={selectedTool === 'eraser' ? '#a18f68' : brushColor}
+                      strokeWidth={Math.min(22, brushSize * 0.6)} strokeLinecap="round" opacity={brushOpacity} /></svg>
+                  </div>
+                  <label className="toolbox-range">{selectedTool === 'text' ? 'Letter size' : 'Stroke width'}<span>{selectedTool === 'text' ? fontSize : brushSize}px</span>
+                    <input type="range" min={selectedTool === 'text' ? 8 : 1} max={selectedTool === 'text' ? 120 : 80}
+                      value={selectedTool === 'text' ? fontSize : brushSize} onChange={event => (selectedTool === 'text' ? setFontSize : setBrushSize)(Number(event.target.value))} />
+                  </label>
+                  {isInk && selectedTool !== 'eraser' && <label className="toolbox-range">Ink opacity<span>{Math.round(brushOpacity * 100)}%</span>
+                    <input type="range" min={5} max={100} value={Math.round(brushOpacity * 100)} onChange={event => setBrushOpacity(Number(event.target.value) / 100)} />
+                  </label>}
+                  {isInk && <div className="flex gap-2">{[2, 5, 12, 28].map(size => <button key={size} type="button" aria-label={`${size}px stroke`}
+                    className="toolbox-action" aria-pressed={brushSize === size} onClick={() => setBrushSize(size)}>{size}px</button>)}</div>}
+                </PopoverContent>
+              </Popover>
+              {isShape && <button type="button" className="toolbox-property" aria-label="Fill shapes" aria-pressed={shapeFilled}
+                onClick={() => setShapeFilled(!shapeFilled)}>{shapeFilled ? <PaintBucket size={14} /> : <SquareDashed size={14} />}{shapeFilled ? 'Filled' : 'Outline'}</button>}
+              {isInk && selectedTool !== 'eraser' && <Popover>
+                <PopoverTrigger asChild><button type="button" className="toolbox-property"><Feather size={14} /><span>Presets</span><ChevronDown size={12} /></button></PopoverTrigger>
+                <PopoverContent className="toolbox-popover glass-panel space-y-1" align="start">
+                  <p className="rustic-label mb-2">Start with a mark</p>
+                  {INK_PRESETS.map(preset => <button key={preset.name} type="button" className="toolbox-preset"
+                    onClick={() => { setSelectedTool(preset.tool); setBrushSize(preset.size); setBrushOpacity(preset.opacity) }}>
+                    <span>{preset.name}</span><span className="text-xs opacity-60">{preset.size}px · {Math.round(preset.opacity * 100)}%</span>
+                  </button>)}
+                </PopoverContent>
+              </Popover>}
+            </>}
+            {selectedTool === 'select' && <>
+              <span className="toolbox-selection">{selectedCount ? `${selectedCount} selected` : 'Select artwork to edit'}</span>
+              <Action label="Select all editable objects" icon={SquareMousePointer} disabled={!props.canClear} onClick={props.onSelectAll} />
+            </>}
+            {selectedTool === 'hand' && <span className="toolbox-selection">Drag to explore your canvas</span>}
+            <span className="toolbox-layer" title={`Active layer: ${layerName}${layerLocked ? ' (locked or hidden)' : ''}`}>
+              {layerLocked && <Lock size={11} />}<span>{layerName}</span>
+            </span>
+          </div>
+          <div className="toolbox-editbar" role="toolbar" aria-label="Canvas editing">
+            <Action label="Undo (Ctrl/⌘ Z)" icon={Undo2} disabled={busy || !props.canUndo} onClick={props.onUndo} />
+            <Action label="Redo (Ctrl/⌘ Shift Z)" icon={Redo2} disabled={busy || !props.canRedo} onClick={props.onRedo} />
+            <span className="toolbox-rule" />
+            <Action label="Duplicate selected (Ctrl/⌘ D)" icon={Copy} disabled={busy || !selectedCount} onClick={props.onDuplicate} text="Duplicate" />
+            <Action label="Delete selected objects" icon={Trash2} disabled={busy || !selectedCount} onClick={props.onDelete}
+              text={selectedCount ? `Delete ${selectedCount}` : 'Delete'} destructive />
+            <div className="ml-auto flex items-center gap-1">
+              <ShortcutHelp />
+              <ClearMenu {...props} />
+            </div>
+          </div>
+        </div>}
+      </section>
     </div>
   )
 }
 
-function FillToggle({
-  filled, setFilled, layout,
-}: {
-  filled: boolean
-  setFilled: React.Dispatch<React.SetStateAction<boolean>>
-  layout: 'row' | 'col'
+function Action({ label, icon: Icon, disabled, onClick, text, destructive }: {
+  label: string; icon: React.ElementType; disabled?: boolean; onClick?: () => void; text?: string; destructive?: boolean
 }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <motion.button
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-          onClick={() => setFilled(f => !f)}
-          className={`
-            relative p-2 rounded-lg transition-colors
-            min-w-[36px] min-h-[36px] flex items-center justify-center
-            ${filled ? 'text-white' : 'text-white/45 hover:text-white/75 hover:bg-white/5'}
-          `}
-        >
-          {filled && (
-            <motion.div
-              layoutId={`fillActive_${layout}`}
-              className="absolute inset-0 rounded-lg bg-primary/25 border border-primary/35"
-              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            />
-          )}
-          {filled
-            ? <PaintBucket className="h-[15px] w-[15px] relative z-10" strokeWidth={1.8} />
-            : <SquareDashed className="h-[15px] w-[15px] relative z-10" strokeWidth={1.8} />
-          }
-        </motion.button>
-      </TooltipTrigger>
-      <TooltipContent side={layout === 'col' ? 'right' : 'bottom'} className="text-xs">
-        {filled ? 'Filled' : 'Outline only'}
-      </TooltipContent>
-    </Tooltip>
-  )
+  return <button type="button" className={`toolbox-action ${destructive ? 'is-destructive' : ''}`} aria-label={label} title={label}
+    disabled={disabled || !onClick} onClick={onClick}><Icon size={15} />{text && <span>{text}</span>}</button>
 }
 
-function ClearCanvasButton({ disabled, onClear }: { disabled: boolean; onClear: () => void }) {
+function ClearMenu(props: ToolBarProps) {
   const [open, setOpen] = useState(false)
-  return <Popover open={open} onOpenChange={setOpen}>
-    <PopoverTrigger asChild><button type="button" aria-label="Clear editable canvas" title="Clear canvas"
-      disabled={disabled} className="p-2 text-white/60 disabled:opacity-30"><SquareX size={16} /></button></PopoverTrigger>
-    <PopoverContent className="glass-panel space-y-3 text-sm">
-      <p>Clear all visible, unlocked layers?</p>
-      <p className="text-xs text-white/60">This removes the artwork for everyone in the room.</p>
-      <div className="flex gap-3"><button onClick={() => setOpen(false)}>Cancel</button>
-        <button onClick={() => { onClear(); setOpen(false) }} className="text-red-300">Clear canvas</button></div>
+  const [scope, setScope] = useState<'layer' | 'canvas' | null>(null)
+  return <Popover open={open} onOpenChange={value => { setOpen(value); setScope(null) }}>
+    <PopoverTrigger asChild><button type="button" className="toolbox-action" aria-label="Clear artwork options" title="Clear artwork options"
+      disabled={!props.canClear || props.editPending || !props.isConnected}><Trash2 size={14} /><ChevronDown size={12} /></button></PopoverTrigger>
+    <PopoverContent className="toolbox-popover glass-panel" align="end">
+      {scope ? <div className="space-y-3" role="group" aria-label="Confirm clearing artwork">
+        <p className="font-serif text-lg">Clear {scope === 'layer' ? props.layerName : 'the canvas'}?</p>
+        <p className="text-xs leading-relaxed opacity-70">Visible, unlocked artwork will be removed for everyone. You can undo this edit.</p>
+        <div className="flex gap-2"><button type="button" className="toolbox-action" onClick={() => setScope(null)}>Cancel</button>
+          <button type="button" className="toolbox-action is-destructive" onClick={() => {
+            props.onClear(scope === 'layer' ? props.layerId : undefined); setOpen(false); setScope(null)
+          }}>Clear {scope === 'layer' ? 'layer' : 'canvas'}</button></div>
+      </div> : <div className="space-y-1">
+        <p className="rustic-label mb-2">Make room</p>
+        <button type="button" className="toolbox-preset" disabled={!props.canClearLayer} onClick={() => setScope('layer')}>Clear current layer</button>
+        <button type="button" className="toolbox-preset" onClick={() => setScope('canvas')}>Clear editable canvas</button>
+        <p className="mt-2 text-xs opacity-60">Locked and hidden layers stay untouched.</p>
+      </div>}
+    </PopoverContent>
+  </Popover>
+}
+
+function ShortcutHelp() {
+  return <Popover><PopoverTrigger asChild><button type="button" className="toolbox-action" aria-label="Keyboard shortcuts"><Keyboard size={15} /></button></PopoverTrigger>
+    <PopoverContent className="toolbox-popover glass-panel" align="end">
+      <p className="rustic-label mb-3">At your fingertips</p>
+      <div className="grid grid-cols-2 gap-x-5 gap-y-2 text-xs">{TOOLS.map(tool => <div key={tool.id} className="flex justify-between gap-3"><span>{tool.label}</span><kbd>{tool.key}</kbd></div>)}</div>
+      <div className="mt-3 space-y-2 border-t border-white/10 pt-3 text-xs">
+        <p>W · writing pad</p><p>[ / ] · stroke size</p><p>Delete · selected artwork</p>
+        <p>Ctrl/⌘ A · select all</p><p>Ctrl/⌘ D · duplicate</p><p>Ctrl/⌘ Z · undo · Shift Z to redo</p>
+      </div>
     </PopoverContent>
   </Popover>
 }

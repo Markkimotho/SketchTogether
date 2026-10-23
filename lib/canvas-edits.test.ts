@@ -45,3 +45,11 @@ test('concurrent drawing and deletion are serialized, and failed saves do not bl
   await save({ add: [mark('d')] })
   assert.deepEqual(state.map(e => e.id), ['b', 'c', 'd'])
 })
+
+test('undo refuses to erase artwork that a collaborator moved after it was added', () => {
+  const original = mark('a')
+  assert.throws(() => applyCanvasEdit([{ ...original, offsetX: 50 }], layers,
+    { deleteIds: ['a'], expected: [original] }), /changed/)
+  assert.throws(() => applyCanvasEdit([mark('a', 'locked')], layers,
+    { deleteIds: ['a'], expected: [mark('a', 'locked')] }), /unlocked/)
+})

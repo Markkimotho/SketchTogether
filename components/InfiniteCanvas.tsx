@@ -11,11 +11,14 @@ import type {
 } from '@/types/canvas'
 import { CANVAS_TYPE_CONFIG } from '@/types/canvas'
 import TouchpadPad from './TouchpadPad'
+import { editableElements } from '@/lib/canvas-edits'
+import { getElementBounds, hitTestElement, boxBetween, intersects, type Point, type Bounds, type ElementMove } from '@/lib/selection'
 import { placeInk, type InkStroke } from '@/lib/touchpad'
 
 interface InfiniteCanvasProps {
   isConnected: boolean
   selectedTool: string
+  brushOpacity: number
   brushSize: number
   brushColor: string
   fontSize: number
@@ -30,7 +33,7 @@ interface InfiniteCanvasProps {
   onInkAdd: (strokes: StrokeData[]) => Promise<boolean>
   onShapeAdd: (shape: ShapeData) => void
   onTextAdd: (text: TextData) => void
-  onElementMove: (elementId: string, offsetX: number, offsetY: number) => void
+  onElementsMove: (moves: ElementMove[]) => void
   onCursorMove: (x: number, y: number) => void
   layers: LayerData[]
   canvasType: CanvasType
@@ -223,51 +226,13 @@ const TOOL_CURSORS: Record<string, string> = {
   hand:      'grab',
 }
 
-// ── Selection bounding box ───────────────────────────────────────────────────
-function getElementBounds(el: CanvasElement): { x: number; y: number; w: number; h: number } | null {
-  if (el.type === 'stroke') {
-    const s = el as StrokeData
-    if (s.points.length < 2) return null
-    const ox = s.offsetX ?? 0, oy = s.offsetY ?? 0
-    const xs = s.points.filter((_, i) => i % 2 === 0).map(v => v + ox)
-    const ys = s.points.filter((_, i) => i % 2 === 1).map(v => v + oy)
-    const pad = (s.size / 2) + 6
-    const minX = Math.min(...xs), minY = Math.min(...ys)
-    return {
-      x: minX - pad, y: minY - pad,
-      w: Math.max(...xs) - minX + pad * 2,
-      h: Math.max(...ys) - minY + pad * 2,
-    }
-  }
-  if (el.type === 'shape') {
-    const sh = el as ShapeData
-    const ox = sh.offsetX ?? 0, oy = sh.offsetY ?? 0
-    const rw = Math.abs(sh.width), rh = Math.abs(sh.height)
-    return {
-      x: sh.x + ox + Math.min(sh.width, 0) - 6,
-      y: sh.y + oy + Math.min(sh.height, 0) - 6,
-      w: rw + 12, h: rh + 12,
-    }
-  }
-  if (el.type === 'text') {
-    const t = el as TextData
-    const ox = t.offsetX ?? 0, oy = t.offsetY ?? 0
-    return {
-      x: t.x + ox - 6, y: t.y + oy - 6,
-      w: t.text.length * t.fontSize * 0.62 + 12,
-      h: t.fontSize * 1.4 + 12,
-    }
-  }
-  return null
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   isConnected,
-  selectedTool, brushSize, brushColor, fontSize, shapeFilled, selectedLayer,
+  selectedTool, brushOpacity, brushSize, brushColor, fontSize, shapeFilled, selectedLayer,
   canvasElements, setCanvasElements,
   cursors, onStrokeStart, onStrokeUpdate, onStrokeEnd, onInkAdd,
-  onShapeAdd, onTextAdd, onElementMove, onCursorMove,
+  onShapeAdd, onTextAdd, onElementsMove, onCursorMove,
   layers, canvasType, gridType,
   selectedElementIds, onElementSelect, onElementsDelete,
 }) => {
@@ -280,6 +245,8 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   // Mutable refs that shadow props — safe to read inside pointer event callbacks
   const toolRef         = useRef(selectedTool)
   const colorRef        = useRef(brushColor)
+  const opacityRef      = useRef(brushOpacity)
+  opacityRef.current = brushOpacity
   const sizeRef         = useRef(brushSize)
   const shapeFilledRef  = useRef(shapeFilled)
   const layerRef        = useRef(selectedLayer)
@@ -326,8 +293,11 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   useEffect(() => { layersRef.current          = layers },          [layers])
   useEffect(() => { onElementSelectRef.current = onElementSelect }, [onElementSelect])
 
-  // Pointer-down position for click detection in select tool
-  const selectDownRef = useRef<{ x: number; y: number } | null>(null)
+  const selectionRef = useRef(selectedElementIds)
+  selectionRef.current = selectedElementIds
+  const selectionDragRef = useRef<{ start: Point; elements: CanvasElement[]; dx: number; dy: number } | null>(null)
+  const marqueeRef = useRef<{ start: Point; end: Point; additive: boolean } | null>(null)
+  const [marquee, setMarquee] = useState<Bounds | null>(null)
 
   // Pending text input
   const [pendingText, setPendingText] = useState<{ viewX: number; viewY: number; worldX: number; worldY: number } | null>(null)
@@ -433,7 +403,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         color: colorRef.current,
         size: sizeRef.current * strokeSizeMultiplier(tool),
         layerId: layerRef.current,
-        opacity: strokeOpacity(tool),
+        opacity: tool === 'eraser' ? 1 : strokeOpacity(tool) * opacityRef.current,
       }
       currentStrokeRef.current  = stroke
       currentPressuresRef.current = [pressure]
@@ -519,7 +489,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       currentShapeRef.current = null
       if (shape) onShapeAdd(shape)
     }
-  }, [onStrokeEnd, onShapeAdd, setCanvasElements])
+  }, [onStrokeEnd, onShapeAdd])
 
   // ── Pointer event handler (unified mouse + touch + pen) ──────────────────────
   useEffect(() => {
@@ -547,7 +517,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
     // ── Pinch helpers ───────────────────────────────────────────────────────
     const getPinchInfo = () => {
-      const pts = Array.from(activePointersRef.current.values())
+      const pts = Array.from(activePointersRef.current.values()).filter(pointer => pointer.type === 'touch')
       if (pts.length < 2) return null
       const [a, b] = pts
       return {
@@ -566,14 +536,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
       const tool = toolRef.current
 
-      // For the select tool, do NOT call preventDefault — that suppresses the
-      // browser's mouse-compatibility events and breaks all click detection.
-      if (tool !== 'select') {
-        e.preventDefault()
-      }
-
-      // Record pointer-down position so onUp can decide if it was a click
-      selectDownRef.current = { x: e.clientX, y: e.clientY }
+      e.preventDefault()
 
       // Mark pen as active (persists 500ms after last pen event to reject palms)
       if (e.pointerType === 'pen') {
@@ -592,6 +555,14 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
       // Two-finger touch → switch to pinch/pan regardless of tool
       if (touchCount >= 2) {
+        const drag = selectionDragRef.current
+        if (drag) {
+          const originals = new Map(drag.elements.map(element => [element.id, element]))
+          setCanvasElements(previous => previous.map(element => originals.get(element.id) ?? element))
+        }
+        selectionDragRef.current = null
+        marqueeRef.current = null
+        setMarquee(null)
         if (isDrawingRef.current) endStroke()
         isPanningRef.current = false
         const pinch = getPinchInfo()
@@ -602,7 +573,23 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         return
       }
 
-      if (tool === 'hand') {
+      if (tool === 'select') {
+        const world = toWorld(vp.x, vp.y)
+        const editable = editableElements(canvasElementsRef.current, layersRef.current)
+        const hit = hitTestElement(editable, world, 6 / scaleRef.current)
+        if (hit) {
+          const selected = selectionRef.current.includes(hit.id)
+          const ids = e.shiftKey ? (selected ? selectionRef.current.filter(id => id !== hit.id) : [...selectionRef.current, hit.id])
+            : selected ? selectionRef.current : [hit.id]
+          if (e.shiftKey || !selected) onElementSelectRef.current(hit.id, e.shiftKey)
+          selectionDragRef.current = { start: world, elements: editable.filter(element => ids.includes(element.id)), dx: 0, dy: 0 }
+        } else {
+          if (!e.shiftKey) onElementSelectRef.current('', false)
+          marqueeRef.current = { start: world, end: world, additive: e.shiftKey }
+          setMarquee(boxBetween(world, world))
+        }
+        el.setPointerCapture(e.pointerId)
+      } else if (tool === 'hand') {
         el.setPointerCapture(e.pointerId)
         startPan(e.clientX, e.clientY)
       } else if (tool !== 'select') {
@@ -652,6 +639,26 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         return
       }
 
+      if (toolRef.current === 'select' && (selectionDragRef.current || marqueeRef.current)) {
+        const vp = eventToViewport(e.clientX, e.clientY)
+        const world = toWorld(vp.x, vp.y)
+        const drag = selectionDragRef.current
+        if (drag) {
+          const dx = world.x - drag.start.x, dy = world.y - drag.start.y
+          if (Math.hypot(dx, dy) * scaleRef.current < 3 && !drag.dx && !drag.dy) return
+          drag.dx = dx; drag.dy = dy
+          const originals = new Map(drag.elements.map(element => [element.id, element]))
+          setCanvasElements(previous => previous.map(element => {
+            const original = originals.get(element.id)
+            return original ? { ...element, offsetX: (original.offsetX ?? 0) + dx, offsetY: (original.offsetY ?? 0) + dy } : element
+          }))
+        } else if (marqueeRef.current) {
+          marqueeRef.current.end = world
+          setMarquee(boxBetween(marqueeRef.current.start, world))
+        }
+        return
+      }
+
       if (isPanningRef.current) {
         movePan(e.clientX, e.clientY)
         return
@@ -670,39 +677,27 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
       const tool = toolRef.current
 
-      // Handle select tool: hit-test for click, then return.
-      // Do NOT preventDefault so mouse-compatibility events remain intact.
       if (tool === 'select') {
         activePointersRef.current.delete(e.pointerId)
-        const down = selectDownRef.current
-        selectDownRef.current = null
-        if (down) {
-          const dx = Math.abs(e.clientX - down.x)
-          const dy = Math.abs(e.clientY - down.y)
-          if (dx < 5 && dy < 5) {
-            // It was a tap/click — hit-test against element bounding boxes
-            const vp = eventToViewport(e.clientX, e.clientY)
-            const world = {
-              x: (vp.x - positionRef.current.x) / scaleRef.current,
-              y: (vp.y - positionRef.current.y) / scaleRef.current,
-            }
-            const visibleLayerIds = new Set(
-              layersRef.current
-                .filter(l => l.visible && !l.locked)
-                .map(l => l.id)
-            )
-            const hit = [...canvasElementsRef.current]
-              .reverse()
-              .find(el => {
-                if (!visibleLayerIds.has(el.layerId)) return false
-                const b = getElementBounds(el)
-                return b != null && world.x >= b.x && world.x <= b.x + b.w
-                  && world.y >= b.y && world.y <= b.y + b.h
-              })
-            if (hit) {
-              onElementSelectRef.current(hit.id, e.shiftKey)
-            } else {
-              onElementSelectRef.current('', false)
+        const drag = selectionDragRef.current
+        selectionDragRef.current = null
+        if (drag && (drag.dx || drag.dy)) {
+          if (e.type === 'pointercancel') {
+            const originals = new Map(drag.elements.map(element => [element.id, element]))
+            setCanvasElements(previous => previous.map(element => originals.get(element.id) ?? element))
+          } else onElementsMove(drag.elements.map(before => ({ before,
+            offsetX: (before.offsetX ?? 0) + drag.dx, offsetY: (before.offsetY ?? 0) + drag.dy })))
+        }
+        const area = marqueeRef.current
+        marqueeRef.current = null
+        setMarquee(null)
+        if (area && e.type !== 'pointercancel') {
+          if (!area.additive) onElementSelectRef.current('', false)
+          const box = boxBetween(area.start, area.end)
+          if (box.w * scaleRef.current > 3 || box.h * scaleRef.current > 3) {
+            for (const element of editableElements(canvasElementsRef.current, layersRef.current)) {
+              const bounds = getElementBounds(element)
+              if (bounds && intersects(box, bounds) && (!area.additive || !selectionRef.current.includes(element.id))) onElementSelectRef.current(element.id, true)
             }
           }
         }
@@ -741,7 +736,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       el.removeEventListener('pointerup',     onUp)
       el.removeEventListener('pointercancel', onUp)
     }
-  }, [startStroke, updateStroke, endStroke, eventToViewport])
+  }, [startStroke, updateStroke, endStroke, eventToViewport, toWorld, setCanvasElements, onElementsMove])
 
   // ── Wheel zoom ───────────────────────────────────────────────────────────────
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -880,16 +875,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                       lineCap="round"
                       lineJoin="round"
                       globalCompositeOperation={s.tool === 'eraser' ? 'destination-out' : 'source-over'}
-                      draggable={selectedTool === 'select' && !layer.locked}
-                      onDragEnd={(e) => {
-                        const ox = (s.offsetX ?? 0) + e.target.x()
-                        const oy = (s.offsetY ?? 0) + e.target.y()
-                        e.target.x(0); e.target.y(0)
-                        setCanvasElements(prev =>
-                          prev.map(el => el.id === s.id ? { ...el, offsetX: ox, offsetY: oy } as StrokeData : el)
-                        )
-                        onElementMove(s.id, ox, oy)
-                      }}
+                      draggable={false}
                     />
                   )
                 }
@@ -915,18 +901,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                         strokeEnabled={!sh.filled}
                         opacity={isSelected ? 0.55 : 1}
                         cornerRadius={2}
-                        draggable={selectedTool === 'select' && !layer.locked}
-                        onDragEnd={(e) => {
-                          const nx = rx + e.target.x()
-                          const ny = ry + e.target.y()
-                          e.target.x(0); e.target.y(0)
-                          setCanvasElements(prev =>
-                            prev.map(el => el.id === sh.id
-                              ? { ...el, x: nx, y: ny, width: rw, height: rh, offsetX: 0, offsetY: 0 } as ShapeData
-                              : el)
-                          )
-                          onElementMove(sh.id, 0, 0)
-                        }}
+                        draggable={false}
                       />
                     )
                   }
@@ -944,20 +919,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                         strokeWidth={sh.filled ? 0 : (sh.strokeWidth ?? 2)}
                         strokeEnabled={!sh.filled}
                         opacity={isSelected ? 0.55 : 1}
-                        draggable={selectedTool === 'select' && !layer.locked}
-                        onDragEnd={(e) => {
-                          const cx = sh.x + sh.width / 2 + (sh.offsetX ?? 0) + e.target.x()
-                          const cy = sh.y + sh.height / 2 + (sh.offsetY ?? 0) + e.target.y()
-                          e.target.x(0); e.target.y(0)
-                          setCanvasElements(prev =>
-                            prev.map(el =>
-                              el.id === sh.id
-                                ? { ...el, x: cx - sh.width / 2, y: cy - sh.height / 2, offsetX: 0, offsetY: 0 } as ShapeData
-                                : el
-                            )
-                          )
-                          onElementMove(sh.id, 0, 0)
-                        }}
+                        draggable={false}
                       />
                     )
                   }
@@ -971,16 +933,7 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                       text={t.text} fontSize={t.fontSize}
                       fill={t.color} fontFamily={t.fontFamily ?? 'serif'}
                       opacity={isSelected ? 0.55 : 1}
-                      draggable={selectedTool === 'select' && !layer.locked}
-                      onDragEnd={(e) => {
-                        const nx = t.x + (t.offsetX ?? 0) + e.target.x()
-                        const ny = t.y + (t.offsetY ?? 0) + e.target.y()
-                        e.target.x(0); e.target.y(0)
-                        setCanvasElements(prev =>
-                          prev.map(el => el.id === t.id ? { ...el, x: nx, y: ny, offsetX: 0, offsetY: 0 } as TextData : el)
-                        )
-                        onElementMove(t.id, 0, 0)
-                      }}
+                      draggable={false}
                     />
                   )
                 }
@@ -990,6 +943,8 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           )
         })}
 
+        {marquee && <Layer listening={false}><Rect x={marquee.x} y={marquee.y} width={marquee.w} height={marquee.h}
+          stroke="#6b7b45" fill="rgba(107,123,69,0.1)" strokeWidth={1 / scale} dash={[5 / scale, 3 / scale]} /></Layer>}
         {/* Selection highlight overlay */}
         {selectedElementIds.length > 0 && (
           <Layer listening={false}>
@@ -1002,10 +957,10 @@ const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                   <Rect
                     key={`sel-${el.id}`}
                     x={b.x} y={b.y} width={b.w} height={b.h}
-                    stroke="#4f9eff"
+                    stroke="#6b7b45"
                     strokeWidth={1.5 / scale}
                     dash={[5 / scale, 3 / scale]}
-                    fill="rgba(79,158,255,0.08)"
+                    fill="rgba(107,123,69,0.09)"
                     cornerRadius={3 / scale}
                     listening={false}
                   />
