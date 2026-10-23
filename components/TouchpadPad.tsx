@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { Maximize2, Minimize2, Touchpad, Undo2, X } from 'lucide-react'
 import { panInkPage, type InkStroke } from '@/lib/touchpad'
@@ -23,6 +23,7 @@ export default function TouchpadPad({ color, size, disabledReason, onInsert }: T
   const [page, setPage] = useState({ x: 0, y: 0 })
   const [surfaceSize, setSurfaceSize] = useState({ width: 800, height: 320 })
   const panelRef = useRef<HTMLElement | null>(null)
+  const surfaceRef = useRef<HTMLDivElement | null>(null)
   const padRef = useRef<SVGSVGElement | null>(null)
   const draftRef = useRef<InkStroke | null>(null)
   const enabledRef = useRef(false)
@@ -40,9 +41,10 @@ export default function TouchpadPad({ color, size, disabledReason, onInsert }: T
     if (idleRef.current) clearTimeout(idleRef.current)
     idleRef.current = null
     const stroke = draftRef.current
+    if (!stroke) return
     draftRef.current = null
     setDraft(null)
-    if (stroke) setStrokes(prev => [...prev, stroke])
+    setStrokes(prev => [...prev, stroke])
   }, [])
 
   const pause = useCallback(() => {
@@ -96,14 +98,26 @@ export default function TouchpadPad({ color, size, disabledReason, onInsert }: T
 
   useEffect(() => {
     const pad = padRef.current
-    if (!pad || !open) return
+    const surface = surfaceRef.current
+    if (!pad || !surface || !open) return
     // One page unit equals one CSS pixel in either layout, so expanding reveals
     // more paper instead of stretching existing handwriting.
+    let width = 0, height = 0
     const resize = new ResizeObserver(([entry]) => {
-      setSurfaceSize({ width: Math.max(1, entry.contentRect.width), height: Math.max(1, entry.contentRect.height) })
+      if (!entry) return
+      const nextWidth = Math.max(1, Math.round(entry.contentRect.width))
+      const nextHeight = Math.max(1, Math.round(entry.contentRect.height))
+      if (width === nextWidth && height === nextHeight) return
+      width = nextWidth
+      height = nextHeight
+      setSurfaceSize(previous => previous.width === width && previous.height === height
+        ? previous : { width, height })
       finish()
     })
-    resize.observe(pad)
+    // SVG ResizeObserver measurements describe its graphics bounding box. The
+    // ruled lines depend on surfaceSize, so observing the SVG feeds rendering
+    // back into measurement. Observe an independently sized HTML viewport.
+    resize.observe(surface)
     const wheel = (event: WheelEvent) => {
       event.preventDefault()
       event.stopPropagation()
@@ -182,38 +196,42 @@ export default function TouchpadPad({ color, size, disabledReason, onInsert }: T
                 className="p-2 rounded hover:bg-white/10"><X size={18} /></button>
             </div>
           </div>
-          <svg ref={padRef} viewBox={`${page.x} ${page.y} ${surfaceSize.width} ${surfaceSize.height}`} tabIndex={0}
-            role="application" aria-label="Handwriting surface" aria-describedby="touchpad-help"
-            className={`mt-3 w-full ${expanded ? 'flex-1 min-h-[140px]' : 'h-[200px] sm:h-[220px] shrink-0'} rounded-xl bg-[#f4ebd8] outline-none focus:ring-2 focus:ring-amber-400 touch-none`}
-            style={{ cursor: enabled ? 'crosshair' : 'default' }}
-            onBlur={event => {
-              if (!panelRef.current?.contains(event.relatedTarget as Node | null)) pause()
-            }}
-            onPointerDown={event => {
-              if (saving || !event.isPrimary || event.button !== 0) return
-              event.preventDefault()
-              event.currentTarget.focus()
-              event.currentTarget.setPointerCapture(event.pointerId)
-              pointerRef.current = event.pointerId
-              finish()
-              draw(point(event))
-            }}
-            onPointerMove={event => {
-              if (saving || !event.isPrimary || performance.now() < scrollUntilRef.current) return
-              const dragging = pointerRef.current === event.pointerId
-              if (pointerRef.current !== null && !dragging) return
-              const rect = event.currentTarget.getBoundingClientRect()
-              if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) { finish(); return }
-              if (dragging || (event.pointerType === 'mouse' && enabledRef.current)) draw(point(event), !dragging)
-            }}
-            onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}
-            onPointerLeave={() => { if (pointerRef.current === null) finish() }}>
-            {lines.map(y => <line key={y} x1={page.x} x2={page.x + surfaceSize.width} y1={y} y2={y} stroke="#c8baa0" strokeWidth="1" />)}
-            {[...strokes, ...(draft ? [draft] : [])].map((stroke, index) => stroke.points.length === 2
-              ? <circle key={stroke.id ?? index} cx={stroke.points[0]} cy={stroke.points[1]} r={stroke.size / 2} fill={stroke.color} />
-              : <polyline key={stroke.id ?? index} points={stroke.points.join(' ')} fill="none" stroke={stroke.color}
-                  strokeWidth={stroke.size} strokeLinecap="round" strokeLinejoin="round" />)}
-          </svg>
+          <div ref={surfaceRef} data-testid="writing-pad-viewport"
+            className={`relative mt-3 w-full min-w-0 overflow-hidden rounded-xl ${expanded ? 'flex-1 min-h-[140px]' : 'h-[200px] sm:h-[220px] shrink-0'}`}>
+            <svg ref={padRef} viewBox={`${page.x} ${page.y} ${surfaceSize.width} ${surfaceSize.height}`} tabIndex={0}
+              preserveAspectRatio="none"
+              role="application" aria-label="Handwriting surface" aria-describedby="touchpad-help"
+              className="absolute inset-0 block h-full w-full bg-[#f4ebd8] outline-none focus:ring-2 focus:ring-inset focus:ring-amber-400 touch-none"
+              style={{ cursor: enabled ? 'crosshair' : 'default' }}
+              onBlur={event => {
+                if (!panelRef.current?.contains(event.relatedTarget as Node | null)) pause()
+              }}
+              onPointerDown={event => {
+                if (saving || !event.isPrimary || event.button !== 0) return
+                event.preventDefault()
+                event.currentTarget.focus()
+                event.currentTarget.setPointerCapture(event.pointerId)
+                pointerRef.current = event.pointerId
+                finish()
+                draw(point(event))
+              }}
+              onPointerMove={event => {
+                if (saving || !event.isPrimary || performance.now() < scrollUntilRef.current) return
+                const dragging = pointerRef.current === event.pointerId
+                if (pointerRef.current !== null && !dragging) return
+                const rect = event.currentTarget.getBoundingClientRect()
+                if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) { finish(); return }
+                if (dragging || (event.pointerType === 'mouse' && enabledRef.current)) draw(point(event), !dragging)
+              }}
+              onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}
+              onPointerLeave={() => { if (pointerRef.current === null) finish() }}>
+              {lines.map(y => <line key={y} x1={page.x} x2={page.x + surfaceSize.width} y1={y} y2={y} stroke="#c8baa0" strokeWidth="1" />)}
+              {[...strokes, ...(draft ? [draft] : [])].map((stroke, index) => stroke.points.length === 2
+                ? <circle key={stroke.id ?? index} cx={stroke.points[0]} cy={stroke.points[1]} r={stroke.size / 2} fill={stroke.color} />
+                : <polyline key={stroke.id ?? index} points={stroke.points.join(' ')} fill="none" stroke={stroke.color}
+                    strokeWidth={stroke.size} strokeLinecap="round" strokeLinejoin="round" />)}
+            </svg>
+          </div>
           <p className="mt-2 shrink-0 text-xs text-amber-200" role="status">
             {saving ? 'Saving handwriting…' : enabled ? 'Writing on — glide to write. Press W to pause.'
               : 'Writing paused — press W to resume. Click-and-drag, touch and pen also work.'}
